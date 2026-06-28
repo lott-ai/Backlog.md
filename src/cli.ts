@@ -9,6 +9,7 @@ import { Command } from "commander";
 import { runAdvancedConfigWizard } from "./commands/advanced-config-wizard.ts";
 import { type CompletionInstallResult, installCompletion, registerCompletionCommand } from "./commands/completion.ts";
 import { configureAdvancedSettings } from "./commands/configure-advanced-settings.ts";
+import { registerGlobalCommand } from "./commands/global.ts";
 import { addHelpSchema, choiceType, statusType } from "./commands/help-schema.ts";
 import { registerInstructionsCommand } from "./commands/instructions.ts";
 import { registerMcpCommand } from "./commands/mcp.ts";
@@ -64,9 +65,14 @@ import {
 	type McpClientSetupKey,
 	runMcpClientSetupCommand,
 } from "./utils/mcp-client-setup.ts";
-import { createMilestoneFilterValueResolver, resolveClosestMilestoneFilterValue } from "./utils/milestone-filter.ts";
+import {
+	createMilestoneFilterValueResolver,
+	resolveClosestMilestoneFilterValue,
+	resolveMilestoneFilterInputs,
+} from "./utils/milestone-filter.ts";
 import { resolveMilestoneInputForStorage } from "./utils/milestone-storage.ts";
 import { hasAnyPrefix } from "./utils/prefix-config.ts";
+import { InvalidServerPortError, resolveServerPort } from "./utils/resolve-server-port.ts";
 import { type RuntimeCwdResolution, resolveRuntimeCwd } from "./utils/runtime-cwd.ts";
 import { formatValidStatuses, getCanonicalStatus, getValidStatuses } from "./utils/status.ts";
 import {
@@ -78,6 +84,7 @@ import {
 } from "./utils/task-builders.ts";
 import { buildTaskUpdateInput } from "./utils/task-edit-builder.ts";
 import { normalizeTaskId, taskIdsEqual } from "./utils/task-path.ts";
+import { applySharedTaskFilters } from "./utils/task-search.ts";
 import { sortTasks } from "./utils/task-sorting.ts";
 import { getTerminalStatus, isTerminalStatus } from "./utils/terminal-status.ts";
 import { getVersion } from "./utils/version.ts";
@@ -407,6 +414,12 @@ async function requireProjectRoot(): Promise<string> {
 	if (!root) {
 		console.error("No Backlog.md project found. Run `backlog init` to initialize.");
 		process.exit(1);
+	}
+	try {
+		const { touchProjectRegistry } = await import("./global/registry.ts");
+		void touchProjectRegistry(root).catch(() => {});
+	} catch {
+		// registry is best-effort
 	}
 	return root;
 }
@@ -3958,11 +3971,30 @@ sequenceCmd
 	.description("list and inspect execution sequences computed from task dependencies")
 	.command("list")
 	.description("list sequences (interactive by default; use --plain for text output)")
+	.option(
+		"-m, --milestone <milestone>",
+		"filter tasks by milestone before computing sequences (repeatable or comma-separated)",
+		createMultiValueAccumulator(),
+	)
 	.option("--plain", "use plain text output instead of interactive UI")
 	.action(async (options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
-		const tasks = await core.queryTasks();
+		let tasks = await core.queryTasks();
+		const milestoneFilters = parseDelimitedStringList(options.milestone) ?? [];
+		if (milestoneFilters.length > 0) {
+			const [activeMilestones, archivedMilestones] = await Promise.all([
+				core.filesystem.listMilestones(),
+				core.filesystem.listArchivedMilestones(),
+			]);
+			const milestoneEntities = [...activeMilestones, ...archivedMilestones];
+			const resolvedMilestones = resolveMilestoneFilterInputs(milestoneFilters, milestoneEntities);
+			const resolveMilestoneLabel = createMilestoneFilterValueResolver(milestoneEntities);
+			tasks = applySharedTaskFilters(tasks, {
+				milestone: resolvedMilestones.length === 1 ? resolvedMilestones[0] : resolvedMilestones,
+				resolveMilestoneLabel,
+			});
+		}
 		// Exclude tasks marked as Done from sequences (case-insensitive)
 		const activeTasks = tasks.filter((t) => (t.status || "").toLowerCase() !== "done");
 		const { unsequenced, sequences } = computeSequences(activeTasks);
@@ -4503,16 +4535,13 @@ program
 			const { BacklogServer } = await import("./server/index.ts");
 			const server = new BacklogServer(cwd);
 
-			// Load config to get default port
 			const core = new Core(cwd);
 			const config = await core.filesystem.loadConfig();
-			const defaultPort = config?.defaultPort ?? 6420;
-
-			const port = Number.parseInt(options.port || defaultPort.toString(), 10);
-			if (Number.isNaN(port) || port < 1 || port > 65535) {
-				console.error("Invalid port number. Must be between 1 and 65535.");
-				process.exit(1);
-			}
+			const port = resolveServerPort({
+				cliPort: options.port,
+				configPort: config?.defaultPort,
+				fallback: 6420,
+			});
 
 			await server.start(port, options.open !== false);
 
@@ -4535,6 +4564,10 @@ program
 			process.once("SIGTERM", () => void shutdown("SIGTERM"));
 			process.once("SIGQUIT", () => void shutdown("SIGQUIT"));
 		} catch (err) {
+			if (err instanceof InvalidServerPortError) {
+				console.error(err.message);
+				process.exit(1);
+			}
 			console.error("Failed to start browser interface", err);
 			process.exitCode = 1;
 		}
@@ -4572,6 +4605,9 @@ registerInstructionsCommand(program);
 
 // MCP command group
 registerMcpCommand(program);
+
+// Global command group
+registerGlobalCommand(program);
 
 program.parseAsync(process.argv).finally(() => {
 	// Restore BUN_OPTIONS after CLI parsing completes so it's available for subsequent commands

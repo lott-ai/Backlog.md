@@ -73,6 +73,10 @@ export interface Task {
 	source?: "local" | "remote" | "completed" | "local-branch";
 	/** Optional per-task callback command to run on status change (overrides global config) */
 	onStatusChange?: string;
+	/** Present in global browser dashboard responses */
+	projectKey?: string;
+	projectName?: string;
+	projectPath?: string;
 }
 
 export interface MilestoneBucket {
@@ -185,6 +189,9 @@ export interface Decision {
 	consequences: string;
 	alternatives?: string;
 	readonly rawContent: string; // Raw markdown content without frontmatter
+	projectKey?: string;
+	projectName?: string;
+	projectPath?: string;
 }
 
 export interface Milestone {
@@ -192,6 +199,9 @@ export interface Milestone {
 	title: string;
 	description: string;
 	readonly rawContent: string; // Raw markdown content without frontmatter
+	projectKey?: string;
+	projectName?: string;
+	projectPath?: string;
 }
 
 export const DOCUMENT_TYPE_VALUES = ["readme", "guide", "specification", "other"] as const;
@@ -209,6 +219,9 @@ export interface Document {
 	name?: string;
 	path?: string;
 	lastModified?: string;
+	projectKey?: string;
+	projectName?: string;
+	projectPath?: string;
 }
 
 export interface DocumentCreateInput {
@@ -350,4 +363,11 @@ export interface BacklogConfig {
 export interface ParsedMarkdown {
 	frontmatter: Record<string, unknown>;
 	content: string;
+}
+
+/** Cross-project entity tagging for the global browser dashboard. */
+export interface ProjectRef {
+	projectKey: string;
+	projectName: string;
+	projectPath: string;
 }
