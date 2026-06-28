@@ -3,7 +3,7 @@ import { apiClient } from '../lib/api';
 import { SuccessToast } from './SuccessToast';
 import type { BacklogConfig } from '../../types';
 
-const Settings: React.FC = () => {
+const Settings: React.FC<{ isGlobalMode?: boolean }> = ({ isGlobalMode = false }) => {
 	const [config, setConfig] = useState<BacklogConfig | null>(null);
 	const [originalConfig, setOriginalConfig] = useState<BacklogConfig | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -43,7 +43,7 @@ const Settings: React.FC = () => {
 
 	const handleInputChange = (field: keyof BacklogConfig, value: any) => {
 		if (!config) return;
-		
+
 		setConfig({
 			...config,
 			[field]: value
@@ -122,6 +122,22 @@ const Settings: React.FC = () => {
 		);
 	}
 
+	if (isGlobalMode) {
+		return (
+			<div className="container mx-auto px-4 py-8 max-w-3xl">
+				<h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">Global Dashboard Settings</h2>
+				<p className="text-gray-600 dark:text-gray-300 mb-6">
+					Per-project configuration is managed in each project&apos;s browser UI. Use the CLI to manage registered projects:
+				</p>
+				<ul className="list-disc list-inside space-y-2 text-sm text-gray-700 dark:text-gray-300 font-mono">
+					<li>backlog global projects list</li>
+					<li>backlog global projects add &lt;path&gt;</li>
+					<li>backlog global projects scan --paths ~/github.com</li>
+				</ul>
+			</div>
+		);
+	}
+
 	if (!config) {
 		return (
 			<div className="container mx-auto px-4 py-8">
@@ -157,11 +173,10 @@ const Settings: React.FC = () => {
 									type="text"
 									value={config.projectName}
 									onChange={(e) => handleInputChange('projectName', e.target.value)}
-									className={`w-full px-3 py-2 border rounded-lg text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200 ${
-										validationErrors.projectName 
-											? 'border-red-500 dark:border-red-400' 
+									className={`w-full px-3 py-2 border rounded-lg text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200 ${validationErrors.projectName
+											? 'border-red-500 dark:border-red-400'
 											: 'border-gray-300 dark:border-gray-600'
-									}`}
+										}`}
 								/>
 								{validationErrors.projectName && (
 									<p className="mt-1 text-sm text-red-600 dark:text-red-400">{validationErrors.projectName}</p>
@@ -325,11 +340,10 @@ const Settings: React.FC = () => {
 									max="65535"
 									value={config.defaultPort || 6420}
 									onChange={(e) => handleInputChange('defaultPort', parseInt(e.target.value) || 6420)}
-									className={`w-full px-3 py-2 border rounded-lg text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200 ${
-										validationErrors.defaultPort 
-											? 'border-red-500 dark:border-red-400' 
+									className={`w-full px-3 py-2 border rounded-lg text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200 ${validationErrors.defaultPort
+											? 'border-red-500 dark:border-red-400'
 											: 'border-gray-300 dark:border-gray-600'
-									}`}
+										}`}
 								/>
 								{validationErrors.defaultPort && (
 									<p className="mt-1 text-sm text-red-600 dark:text-red-400">{validationErrors.defaultPort}</p>
@@ -454,22 +468,22 @@ const Settings: React.FC = () => {
 					</div>
 
 					{/* Save/Cancel Buttons */}
-						<div className="flex items-center justify-end space-x-4">
-							<button
-								onClick={handleCancel}
-								disabled={!hasUnsavedChanges || saving}
-								className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 disabled:opacity-50 transition-colors duration-200"
-							>
-								Cancel
-							</button>
-							<button
-								onClick={handleSave}
-								disabled={!hasUnsavedChanges || saving}
-								className="px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white rounded-lg hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 disabled:opacity-50 transition-colors duration-200"
-							>
-								{saving ? 'Saving...' : 'Save Changes'}
-							</button>
-						</div>
+					<div className="flex items-center justify-end space-x-4">
+						<button
+							onClick={handleCancel}
+							disabled={!hasUnsavedChanges || saving}
+							className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 disabled:opacity-50 transition-colors duration-200"
+						>
+							Cancel
+						</button>
+						<button
+							onClick={handleSave}
+							disabled={!hasUnsavedChanges || saving}
+							className="px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white rounded-lg hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 disabled:opacity-50 transition-colors duration-200"
+						>
+							{saving ? 'Saving...' : 'Save Changes'}
+						</button>
+					</div>
 				</div>
 			</div>
 

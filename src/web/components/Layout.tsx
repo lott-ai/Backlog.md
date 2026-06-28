@@ -8,6 +8,7 @@ import type { DuplicateGroup } from '../../utils/duplicate-detection';
 
 interface LayoutProps {
 	projectName: string;
+	isGlobalMode?: boolean;
 	showSuccessToast: boolean;
 	onDismissToast: () => void;
 	tasks: Task[];
@@ -20,6 +21,7 @@ interface LayoutProps {
 
 export default function Layout({
 	projectName,
+	isGlobalMode = false,
 	showSuccessToast,
 	onDismissToast,
 	tasks,
@@ -33,7 +35,7 @@ export default function Layout({
 		<div className="h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
 			<HealthIndicator />
 			<DuplicateIdWarning groups={duplicateGroups} />
-			<SideNavigation 
+			<SideNavigation
 				tasks={tasks}
 				docs={docs}
 				decisions={decisions}
@@ -41,7 +43,7 @@ export default function Layout({
 				onRefreshData={onRefreshData}
 			/>
 			<div className="flex-1 flex flex-col min-h-0 min-w-0">
-				<Navigation projectName={projectName} />
+				<Navigation projectName={projectName} isGlobalMode={isGlobalMode} />
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Outlet context={{ tasks, docs, decisions, isLoading, onRefreshData }} />
 				</main>

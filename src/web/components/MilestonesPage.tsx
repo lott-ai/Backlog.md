@@ -1,7 +1,9 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import Fuse from "fuse.js";
-import { apiClient } from "../lib/api";
+import { apiClient, taskProjectKey } from "../lib/api";
+import { useProjectFilter } from "../contexts/ProjectFilterContext";
+import type { ProjectRef } from "../../types";
 import { buildMilestoneBuckets, collectArchivedMilestoneKeys, isDoneStatus, milestoneKey } from "../utils/milestones";
 import { type Milestone, type MilestoneBucket, type Task } from "../../types";
 import MilestoneTaskRow from "./MilestoneTaskRow";
@@ -48,6 +50,16 @@ interface MilestonesPageProps {
 	archivedMilestones: Milestone[];
 	onEditTask: (task: Task) => void;
 	onRefreshData?: () => Promise<void>;
+	isGlobalMode?: boolean;
+}
+
+function resolveMilestoneProjectKey(
+	milestoneId: string | undefined,
+	milestoneEntities: Milestone[],
+): string | undefined {
+	if (!milestoneId) return undefined;
+	const entity = milestoneEntities.find((m) => m.id === milestoneId || m.title === milestoneId);
+	return entity ? taskProjectKey(entity as Milestone & ProjectRef) : undefined;
 }
 
 const MilestonesPage: React.FC<MilestonesPageProps> = ({
@@ -57,7 +69,11 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 	archivedMilestones,
 	onEditTask,
 	onRefreshData,
+	isGlobalMode = false,
 }) => {
+	const { projects, selectedProjectKeys } = useProjectFilter();
+	const defaultProjectKey =
+		selectedProjectKeys[0] ?? projects.find((project) => project.healthy)?.key;
 	const [newMilestone, setNewMilestone] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [success, setSuccess] = useState<string | null>(null);
@@ -116,18 +132,18 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 			exactIdMatches.length > 0
 				? new Set(exactIdMatches.map((task) => task.id))
 				: (() => {
-						const fuse = new Fuse(searchableTasks, {
-							threshold: 0.35,
-							ignoreLocation: true,
-							minMatchCharLength: 2,
-							keys: [
-								{ name: "title", weight: 0.55 },
-								{ name: "id", weight: 0.45 },
-							],
-						});
-						const matches = fuse.search(searchQueryTrimmed);
-						return new Set(matches.map((match) => match.item.id));
-					})();
+					const fuse = new Fuse(searchableTasks, {
+						threshold: 0.35,
+						ignoreLocation: true,
+						minMatchCharLength: 2,
+						keys: [
+							{ name: "title", weight: 0.55 },
+							{ name: "id", weight: 0.45 },
+						],
+					});
+					const matches = fuse.search(searchQueryTrimmed);
+					return new Set(matches.map((match) => match.item.id));
+				})();
 
 		return buckets.map((bucket) => {
 			const filteredTasks = bucket.tasks.filter((task) => matchedTaskIds.has(task.id));
@@ -213,7 +229,7 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		}
 
 		try {
-			await apiClient.updateTask(draggedTask.id, { milestone: targetMilestone });
+			await apiClient.updateTask(draggedTask.id, { milestone: targetMilestone }, taskProjectKey(draggedTask));
 			if (onRefreshData) {
 				await onRefreshData();
 			}
@@ -249,7 +265,10 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		setError(null);
 		setSuccess(null);
 		try {
-			await apiClient.createMilestone(value);
+			if (isGlobalMode && !defaultProjectKey) {
+				throw new Error("Select a project before creating a milestone.");
+			}
+			await apiClient.createMilestone(value, undefined, isGlobalMode ? defaultProjectKey : undefined);
 			setNewMilestone("");
 			setSuccess(`Added milestone "${value}"`);
 			setShowAddModal(false);
@@ -279,7 +298,10 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 			setError(null);
 			setSuccess(null);
 			try {
-				await apiClient.archiveMilestone(bucket.milestone);
+				await apiClient.archiveMilestone(
+					bucket.milestone,
+					resolveMilestoneProjectKey(bucket.milestone, milestoneEntities),
+				);
 				setSuccess(`Archived milestone "${label}"`);
 				if (onRefreshData) {
 					await onRefreshData();
@@ -351,7 +373,11 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		setError(null);
 		setSuccess(null);
 		try {
-			await apiClient.updateMilestone(bucket.milestone, value);
+			await apiClient.updateMilestone(
+				bucket.milestone,
+				value,
+				resolveMilestoneProjectKey(bucket.milestone, milestoneEntities),
+			);
 			closeEditModal();
 			setSuccess(`Renamed milestone "${previousLabel}" to "${value}"`);
 			if (onRefreshData) {
@@ -402,10 +428,14 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		setError(null);
 		setSuccess(null);
 		try {
-			await apiClient.removeMilestone(bucket.milestone, {
-				taskHandling: selectedTaskHandling,
-				reassignTo: selectedTaskHandling === "reassign" ? selectedReassignTo : undefined,
-			});
+			await apiClient.removeMilestone(
+				bucket.milestone,
+				{
+					taskHandling: selectedTaskHandling,
+					reassignTo: selectedTaskHandling === "reassign" ? selectedReassignTo : undefined,
+				},
+				resolveMilestoneProjectKey(bucket.milestone, milestoneEntities),
+			);
 			closeRemoveModal();
 			setSuccess(
 				selectedTaskHandling === "reassign"
@@ -493,13 +523,12 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		return (
 			<div
 				key={bucket.key}
-				className={`rounded-lg border-2 transition-all duration-200 ${
-					isDropTarget
+				className={`rounded-lg border-2 transition-all duration-200 ${isDropTarget
 						? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]"
 						: isDragging
-						? "border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-						: "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-				}`}
+							? "border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+							: "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+					}`}
 				onDragOver={(e) => handleDragOver(e, bucket.key)}
 				onDragLeave={handleDragLeave}
 				onDrop={(e) => handleDrop(e, bucket.milestone)}

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AcceptanceCriterion, Milestone, Task, TaskComment } from "../../types";
 import Modal from "./Modal";
-import { apiClient } from "../lib/api";
+import { apiClient, taskProjectKey } from "../lib/api";
 import { useTheme } from "../contexts/ThemeContext";
 import MDEditor from "@uiw/react-md-editor";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
@@ -23,6 +23,7 @@ interface Props {
   milestoneEntities?: Milestone[];
   archivedMilestoneEntities?: Milestone[];
   definitionOfDoneDefaults?: string[];
+  isGlobalMode?: boolean;
 }
 
 type Mode = "preview" | "edit" | "create";
@@ -613,7 +614,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       } else if (task) {
         Object.assign(taskData, buildDefinitionOfDoneEditPayload());
         // Update existing task
-        await apiClient.updateTask(task.id, taskData);
+        await apiClient.updateTask(task.id, taskData, taskProjectKey(task));
         setMode("preview");
         if (onSaved) await onSaved();
         setCommentsChanged(false);
@@ -643,7 +644,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     const next = (criteria || []).map((c) => (c.index === index ? { ...c, checked } : c));
     setCriteria(next);
     try {
-      await apiClient.updateTask(task.id, { acceptanceCriteriaItems: next });
+      await apiClient.updateTask(task.id, { acceptanceCriteriaItems: next }, taskProjectKey(task));
       if (onSaved) await onSaved();
     } catch (err) {
       // rollback
@@ -661,7 +662,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       const updates: TaskUpdatePayload = checked
         ? { definitionOfDoneCheck: [index] }
         : { definitionOfDoneUncheck: [index] };
-      await apiClient.updateTask(task.id, updates);
+      await apiClient.updateTask(task.id, updates, taskProjectKey(task));
       if (onSaved) await onSaved();
     } catch (err) {
       setDefinitionOfDone(definitionOfDone);
@@ -685,7 +686,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     // Only update server if editing existing task
     if (task) {
       try {
-        await apiClient.updateTask(task.id, updates);
+        await apiClient.updateTask(task.id, updates, taskProjectKey(task));
         if (onSaved) await onSaved();
       } catch (err) {
         console.error("Failed to update task metadata", err);
@@ -714,7 +715,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       const updatedTask = await apiClient.updateTask(task.id, {
         commentsAppend: [body],
         ...(author.length > 0 && { commentAuthor: author }),
-      });
+      }, taskProjectKey(task));
       setDisplayComments(updatedTask.comments ?? []);
       setCommentsChanged(true);
       setCommentBody("");
@@ -729,13 +730,13 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
   // labels handled via ChipInput; no textarea parsing
 
-	const handleComplete = async () => {
-		if (!task) return;
-		if (!window.confirm("Complete this task? It will be moved to the completed folder.")) return;
-		try {
-			await apiClient.completeTask(task.id);
-			if (onSaved) await onSaved();
-			onClose();
+  const handleComplete = async () => {
+    if (!task) return;
+    if (!window.confirm("Complete this task? It will be moved to the completed folder.")) return;
+    try {
+      await apiClient.completeTask(task.id, taskProjectKey(task));
+      if (onSaved) await onSaved();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -774,45 +775,45 @@ export const TaskDetailsModal: React.FC<Props> = ({
       disableEscapeClose={mode === "edit" || mode === "create"}
       actions={
         <div className="flex items-center gap-2">
-		          {isDoneStatus && mode === "preview" && !isCreateMode && !isFromOtherBranch && (
-		            <button
-		              onClick={handleComplete}
-		              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
-		              title="Move to completed folder (removes from board)"
-		            >
-		              Mark as completed
-		            </button>
-		          )}
-		          {mode === "preview" && !isCreateMode && !isFromOtherBranch ? (
-		            <button
-		              onClick={() => setMode("edit")}
-		              className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
-		              title="Edit"
-		            >
+          {isDoneStatus && mode === "preview" && !isCreateMode && !isFromOtherBranch && (
+            <button
+              onClick={handleComplete}
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
+              title="Move to completed folder (removes from board)"
+            >
+              Mark as completed
+            </button>
+          )}
+          {mode === "preview" && !isCreateMode && !isFromOtherBranch ? (
+            <button
+              onClick={() => setMode("edit")}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
+              title="Edit"
+            >
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
               Edit
             </button>
           ) : (mode === "edit" || mode === "create") ? (
             <div className="flex items-center gap-2">
-		              <button
-		                onClick={handleCancelEdit}
-		                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
-		                title="Cancel"
-		              >
+              <button
+                onClick={handleCancelEdit}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
+                title="Cancel"
+              >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
                 Cancel
               </button>
-		              <button
-		                onClick={() => void handleSave()}
-		                disabled={saving}
-		                className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200 disabled:opacity-50"
-		                title="Save"
-		              >
+              <button
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200 disabled:opacity-50"
+                title="Save"
+              >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
@@ -1183,14 +1184,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
         {/* Sidebar */}
         <div className="md:col-span-1 space-y-4">
           {/* Dates */}
-	          {task && (
-	            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 space-y-1">
-	              <div><span className="font-semibold text-gray-800 dark:text-gray-100">Created:</span> <span className="text-gray-700 dark:text-gray-200">{formatStoredUtcDateForDisplay(task.createdDate)}</span></div>
-	              {task.updatedDate && (
-	                <div><span className="font-semibold text-gray-800 dark:text-gray-100">Updated:</span> <span className="text-gray-700 dark:text-gray-200">{formatStoredUtcDateForDisplay(task.updatedDate)}</span></div>
-	              )}
-	            </div>
-	          )}
+          {task && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 space-y-1">
+              <div><span className="font-semibold text-gray-800 dark:text-gray-100">Created:</span> <span className="text-gray-700 dark:text-gray-200">{formatStoredUtcDateForDisplay(task.createdDate)}</span></div>
+              {task.updatedDate && (
+                <div><span className="font-semibold text-gray-800 dark:text-gray-100">Updated:</span> <span className="text-gray-700 dark:text-gray-200">{formatStoredUtcDateForDisplay(task.updatedDate)}</span></div>
+              )}
+            </div>
+          )}
           {/* Title (editable for existing tasks) */}
           {task && (
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
@@ -1271,11 +1272,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
             <select
               className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? 'opacity-60 cursor-not-allowed' : ''}`}
               value={milestoneSelectionValue}
-				onChange={(e) => {
-					const value = e.target.value;
-					setMilestone(value);
-					handleInlineMetaUpdate({ milestone: value.trim().length > 0 ? value : null });
-				}}
+              onChange={(e) => {
+                const value = e.target.value;
+                setMilestone(value);
+                handleInlineMetaUpdate({ milestone: value.trim().length > 0 ? value : null });
+              }}
               disabled={isFromOtherBranch}
             >
               <option value="">No milestone</option>
@@ -1304,14 +1305,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
           </div>
 
           {/* Archive button at bottom of sidebar */}
-		          {task && onArchive && !isFromOtherBranch && (
-		            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-		              <button
-		                onClick={handleArchive}
-		                className="w-full inline-flex items-center justify-center px-4 py-2 bg-red-500 dark:bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-600 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-400 dark:focus:ring-red-500 transition-colors duration-200"
-		              >
-		                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-		                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+          {task && onArchive && !isFromOtherBranch && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+              <button
+                onClick={handleArchive}
+                className="w-full inline-flex items-center justify-center px-4 py-2 bg-red-500 dark:bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-600 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-400 dark:focus:ring-red-500 transition-colors duration-200"
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                 </svg>
                 Archive Task
               </button>

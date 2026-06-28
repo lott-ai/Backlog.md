@@ -134,7 +134,16 @@ backlog browser --port 8080
 
 # Don't open browser automatically
 backlog browser --no-open
+
+# Cross-project dashboard (aggregates registered projects)
+backlog global browser
+
+# Register projects (also auto-registered when you use backlog in a project)
+backlog global projects add ~/github.com/org/repo
+backlog global projects scan --paths ~/github.com
 ```
+
+Port precedence: `--port` > `PORT` environment variable > project `defaultPort` in config. Use `PORT` with tools like [portless](https://github.com/vercel/portless): `portless backlog browser --no-open`.
 
 **Features:**
 - Interactive Kanban board with drag-and-drop
@@ -148,6 +157,8 @@ backlog browser --no-open
 ![Web Interface Screenshot](./.github/web.jpeg)
 
 To keep the Web UI running as an auto-starting local service, see [Running Backlog.md as a Service](backlog/docs/doc-003%20-%20Running-Backlog-Browser-as-a-Service.md).
+
+For a machine-wide view across many Backlog projects, use `backlog global browser` (see [CLI reference](CLI-INSTRUCTIONS.md#web-interface)).
 
 ---
 

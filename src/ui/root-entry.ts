@@ -45,6 +45,7 @@ export function formatRootEntry({ version, initialized, color = false }: RootEnt
 		lines.push(commandLine("backlog init", "Initialize Backlog.md interactively"));
 		lines.push(commandLine("backlog init --defaults", "Initialize with default settings"));
 		lines.push(commandLine("backlog init --no-git", "Initialize without Git integration"));
+		lines.push(commandLine("backlog global browser", "Open cross-project dashboard (any directory)"));
 		lines.push("");
 	} else {
 		lines.push(sectionTitle("Common workflow:", color));
@@ -54,6 +55,7 @@ export function formatRootEntry({ version, initialized, color = false }: RootEnt
 		lines.push(commandLine('backlog task create "Title" -d "Description"', "Create a task"));
 		lines.push(commandLine("backlog board", "Open the TUI Kanban board"));
 		lines.push(commandLine("backlog browser", "Open the Web UI Kanban board"));
+		lines.push(commandLine("backlog global browser", "Open cross-project dashboard"));
 		lines.push("");
 	}
 

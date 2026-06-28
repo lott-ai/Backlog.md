@@ -16,6 +16,7 @@ interface BoardPageProps {
 	archivedMilestones: Milestone[];
 	isLoading: boolean;
 	hideEmptyColumns?: boolean;
+	isGlobalMode?: boolean;
 }
 
 export default function BoardPage({

@@ -4,6 +4,7 @@ import type {
 	Decision,
 	Document,
 	Milestone,
+	ProjectRef,
 	SearchPriorityFilter,
 	SearchResult,
 	SearchResultType,
@@ -13,6 +14,36 @@ import type {
 import type { DuplicateGroup } from "../../utils/duplicate-detection.ts";
 
 const API_BASE = "/api";
+
+export type GlobalTask = Task & ProjectRef;
+export type GlobalMilestone = Milestone & ProjectRef;
+export type GlobalDocument = Document & ProjectRef;
+export type GlobalDecision = Decision & ProjectRef;
+
+export interface ProjectStatusSummary {
+	key: string;
+	name: string;
+	path: string;
+	healthy: boolean;
+	error?: string;
+	lastSeen?: string;
+}
+
+export interface GlobalInitializationStatus {
+	mode: "global";
+	initialized: true;
+	projects: ProjectStatusSummary[];
+}
+
+export type ServerStatus = InitializationStatus | GlobalInitializationStatus;
+
+export function isGlobalStatus(status: ServerStatus): status is GlobalInitializationStatus {
+	return "mode" in status && status.mode === "global";
+}
+
+export function taskProjectKey(entity: { projectKey?: string }): string | undefined {
+	return entity.projectKey;
+}
 
 export interface ReorderTaskPayload {
 	taskId: string;
@@ -81,9 +112,51 @@ const DEFAULT_CONFIG: RequestConfig = {
 
 export class ApiClient {
 	private config: RequestConfig;
+	private serverMode: "project" | "global" = "project";
+	private selectedProjectKeys: string[] = [];
 
 	constructor(config: RequestConfig = {}) {
 		this.config = { ...DEFAULT_CONFIG, ...config };
+	}
+
+	setServerMode(mode: "project" | "global"): void {
+		this.serverMode = mode;
+	}
+
+	getServerMode(): "project" | "global" {
+		return this.serverMode;
+	}
+
+	setSelectedProjectKeys(keys: string[]): void {
+		this.selectedProjectKeys = keys;
+	}
+
+	getSelectedProjectKeys(): string[] {
+		return [...this.selectedProjectKeys];
+	}
+
+	private isGlobalMode(): boolean {
+		return this.serverMode === "global";
+	}
+
+	private apiRoot(): string {
+		return this.isGlobalMode() ? `${API_BASE}/global` : API_BASE;
+	}
+
+	private appendProjectsParam(params: URLSearchParams): void {
+		if (this.isGlobalMode() && this.selectedProjectKeys.length > 0) {
+			params.set("projects", this.selectedProjectKeys.join(","));
+		}
+	}
+
+	private requireProjectKey(projectKey?: string): string {
+		if (!this.isGlobalMode()) {
+			return "";
+		}
+		if (!projectKey) {
+			throw new Error("projectKey is required in global mode");
+		}
+		return projectKey;
 	}
 
 	// Enhanced fetch with retry logic and better error handling
@@ -167,10 +240,10 @@ export class ApiClient {
 				}
 			}
 		}
-		// Default to true for cross-branch loading to match TUI behavior
 		if (options?.crossBranch !== false) params.append("crossBranch", "true");
+		this.appendProjectsParam(params);
 
-		const url = `${API_BASE}/tasks${params.toString() ? `?${params.toString()}` : ""}`;
+		const url = `${this.apiRoot()}/tasks${params.toString() ? `?${params.toString()}` : ""}`;
 		return this.fetchJson<Task[]>(url);
 	}
 
@@ -232,44 +305,68 @@ export class ApiClient {
 		if (options.limit !== undefined) {
 			params.set("limit", String(options.limit));
 		}
+		this.appendProjectsParam(params);
 
-		const url = `${API_BASE}/search${params.toString() ? `?${params.toString()}` : ""}`;
+		const url = `${this.apiRoot()}/search${params.toString() ? `?${params.toString()}` : ""}`;
 		return this.fetchJson<SearchResult[]>(url);
 	}
 
-	async fetchTask(id: string): Promise<Task> {
-		return this.fetchJson<Task>(`${API_BASE}/task/${id}`);
+	async fetchTask(id: string, projectKey?: string): Promise<Task> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/tasks/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/task/${encodeURIComponent(id)}`;
+		return this.fetchJson<Task>(url);
 	}
 
-	async createTask(task: Omit<Task, "id" | "createdDate">): Promise<Task> {
-		return this.fetchJson<Task>(`${API_BASE}/tasks`, {
+	async createTask(task: Omit<Task, "id" | "createdDate"> & Partial<ProjectRef>, projectKey?: string): Promise<Task> {
+		const key = this.requireProjectKey(projectKey ?? task.projectKey);
+		const url = this.isGlobalMode() ? `${API_BASE}/global/tasks` : `${API_BASE}/tasks`;
+		return this.fetchJson<Task>(url, {
 			method: "POST",
-			body: JSON.stringify(task),
+			body: JSON.stringify(this.isGlobalMode() ? { ...task, projectKey: key } : task),
 		});
 	}
 
-	async updateTask(id: string, updates: TaskUpdateRequest): Promise<Task> {
-		return this.fetchJson<Task>(`${API_BASE}/tasks/${id}`, {
+	async updateTask(id: string, updates: TaskUpdateRequest, projectKey?: string): Promise<Task> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/tasks/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/tasks/${encodeURIComponent(id)}`;
+		return this.fetchJson<Task>(url, {
 			method: "PUT",
 			body: JSON.stringify(updates),
 		});
 	}
 
-	async reorderTask(payload: ReorderTaskPayload): Promise<{ success: boolean; task: Task }> {
-		return this.fetchJson<{ success: boolean; task: Task }>(`${API_BASE}/tasks/reorder`, {
+	async reorderTask(
+		payload: ReorderTaskPayload & Partial<ProjectRef>,
+		projectKey?: string,
+	): Promise<{ success: boolean; task: Task }> {
+		const key = this.requireProjectKey(projectKey ?? payload.projectKey);
+		const url = this.isGlobalMode() ? `${API_BASE}/global/tasks/reorder` : `${API_BASE}/tasks/reorder`;
+		return this.fetchJson<{ success: boolean; task: Task }>(url, {
 			method: "POST",
-			body: JSON.stringify(payload),
+			body: JSON.stringify(this.isGlobalMode() ? { ...payload, projectKey: key } : payload),
 		});
 	}
 
-	async archiveTask(id: string): Promise<void> {
-		await this.fetchWithRetry(`${API_BASE}/tasks/${id}`, {
+	async archiveTask(id: string, projectKey?: string): Promise<void> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/tasks/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/tasks/${encodeURIComponent(id)}`;
+		await this.fetchWithRetry(url, {
 			method: "DELETE",
 		});
 	}
 
-	async completeTask(id: string): Promise<void> {
-		await this.fetchWithRetry(`${API_BASE}/tasks/${id}/complete`, {
+	async completeTask(id: string, projectKey?: string): Promise<void> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/tasks/${key}/${encodeURIComponent(id)}/complete`
+			: `${API_BASE}/tasks/${encodeURIComponent(id)}/complete`;
+		await this.fetchWithRetry(url, {
 			method: "POST",
 		});
 	}
@@ -299,8 +396,8 @@ export class ApiClient {
 		});
 	}
 
-	async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
-		return this.updateTask(id, { status });
+	async updateTaskStatus(id: string, status: TaskStatus, projectKey?: string): Promise<Task> {
+		return this.updateTask(id, { status }, projectKey);
 	}
 
 	async fetchDuplicateTasks(): Promise<DuplicateGroup[]> {
@@ -312,7 +409,10 @@ export class ApiClient {
 	}
 
 	async fetchStatuses(): Promise<string[]> {
-		const response = await fetch(`${API_BASE}/statuses`);
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/statuses${params.toString() ? `?${params.toString()}` : ""}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch statuses");
 		}
@@ -320,6 +420,20 @@ export class ApiClient {
 	}
 
 	async fetchConfig(): Promise<BacklogConfig> {
+		if (this.isGlobalMode()) {
+			const response = await fetch(`${API_BASE}/global/config`);
+			if (!response.ok) {
+				throw new Error("Failed to fetch global config");
+			}
+			const globalConfig = await response.json();
+			return {
+				projectName: "Global Dashboard",
+				statuses: await this.fetchStatuses(),
+				labels: [],
+				defaultAssignee: [],
+				...globalConfig,
+			} as BacklogConfig;
+		}
 		const response = await fetch(`${API_BASE}/config`);
 		if (!response.ok) {
 			throw new Error("Failed to fetch config");
@@ -328,6 +442,9 @@ export class ApiClient {
 	}
 
 	async updateConfig(config: BacklogConfig): Promise<BacklogConfig> {
+		if (this.isGlobalMode()) {
+			throw new Error("Global dashboard settings are read-only in the web UI");
+		}
 		const response = await fetch(`${API_BASE}/config`, {
 			method: "PUT",
 			headers: {
@@ -342,30 +459,40 @@ export class ApiClient {
 	}
 
 	async fetchDocs(): Promise<Document[]> {
-		const response = await fetch(`${API_BASE}/docs`);
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/docs${params.toString() ? `?${params.toString()}` : ""}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch documentation");
 		}
 		return response.json();
 	}
 
-	async fetchDoc(filename: string): Promise<Document> {
-		const response = await fetch(`${API_BASE}/docs/${encodeURIComponent(filename)}`);
+	async fetchDoc(filename: string, projectKey?: string): Promise<Document> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/docs/${key}/${encodeURIComponent(filename)}`
+			: `${API_BASE}/docs/${encodeURIComponent(filename)}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch document");
 		}
 		return response.json();
 	}
 
-	async fetchDocument(id: string): Promise<Document> {
-		const response = await fetch(`${API_BASE}/doc/${encodeURIComponent(id)}`);
-		if (!response.ok) {
-			throw new Error("Failed to fetch document");
-		}
-		return response.json();
+	async fetchDocument(id: string, projectKey?: string): Promise<Document> {
+		return this.fetchDoc(id, projectKey);
 	}
 
-	async updateDoc(filename: string, content: string, title?: string, path?: string | null): Promise<Document> {
+	async updateDoc(
+		filename: string,
+		content: string,
+		title?: string,
+		path?: string | null,
+		projectKey?: string,
+	): Promise<Document> {
+		const key = this.requireProjectKey(projectKey);
 		const payload: Record<string, unknown> = { content };
 		if (typeof title === "string") {
 			payload.title = title;
@@ -374,7 +501,10 @@ export class ApiClient {
 			payload.path = path;
 		}
 
-		const response = await fetch(`${API_BASE}/docs/${encodeURIComponent(filename)}`, {
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/docs/${key}/${encodeURIComponent(filename)}`
+			: `${API_BASE}/docs/${encodeURIComponent(filename)}`;
+		const response = await fetch(url, {
 			method: "PUT",
 			headers: {
 				"Content-Type": "application/json",
@@ -387,8 +517,15 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async createDoc(filename: string, content: string, path?: string): Promise<Document & { success?: boolean }> {
-		const response = await fetch(`${API_BASE}/docs`, {
+	async createDoc(
+		filename: string,
+		content: string,
+		path?: string,
+		projectKey?: string,
+	): Promise<Document & { success?: boolean }> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode() ? `${API_BASE}/global/docs/${key}` : `${API_BASE}/docs`;
+		const response = await fetch(url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -402,22 +539,32 @@ export class ApiClient {
 	}
 
 	async fetchDecisions(): Promise<Decision[]> {
-		const response = await fetch(`${API_BASE}/decisions`);
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/decisions${params.toString() ? `?${params.toString()}` : ""}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch decisions");
 		}
 		return response.json();
 	}
 
-	async fetchDecision(id: string): Promise<Decision> {
-		const response = await fetch(`${API_BASE}/decisions/${encodeURIComponent(id)}`);
+	async fetchDecision(id: string, projectKey?: string): Promise<Decision> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/decisions/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/decisions/${encodeURIComponent(id)}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch decision");
 		}
 		return response.json();
 	}
 
-	async fetchDecisionData(id: string): Promise<Decision> {
+	async fetchDecisionData(id: string, projectKey?: string): Promise<Decision> {
+		if (this.isGlobalMode()) {
+			return this.fetchDecision(id, projectKey);
+		}
 		const response = await fetch(`${API_BASE}/decision/${encodeURIComponent(id)}`);
 		if (!response.ok) {
 			throw new Error("Failed to fetch decision");
@@ -425,8 +572,12 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async updateDecision(id: string, content: string): Promise<void> {
-		const response = await fetch(`${API_BASE}/decisions/${encodeURIComponent(id)}`, {
+	async updateDecision(id: string, content: string, projectKey?: string): Promise<void> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/decisions/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/decisions/${encodeURIComponent(id)}`;
+		const response = await fetch(url, {
 			method: "PUT",
 			headers: {
 				"Content-Type": "text/plain",
@@ -438,8 +589,10 @@ export class ApiClient {
 		}
 	}
 
-	async createDecision(title: string): Promise<Decision> {
-		const response = await fetch(`${API_BASE}/decisions`, {
+	async createDecision(title: string, projectKey?: string): Promise<Decision> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode() ? `${API_BASE}/global/decisions/${key}` : `${API_BASE}/decisions`;
+		const response = await fetch(url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -453,7 +606,10 @@ export class ApiClient {
 	}
 
 	async fetchMilestones(): Promise<Milestone[]> {
-		const response = await fetch(`${API_BASE}/milestones`);
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/milestones${params.toString() ? `?${params.toString()}` : ""}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch milestones");
 		}
@@ -461,28 +617,37 @@ export class ApiClient {
 	}
 
 	async fetchArchivedMilestones(): Promise<Milestone[]> {
-		const response = await fetch(`${API_BASE}/milestones/archived`);
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/milestones/archived${params.toString() ? `?${params.toString()}` : ""}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch archived milestones");
 		}
 		return response.json();
 	}
 
-	async fetchMilestone(id: string): Promise<Milestone> {
-		const response = await fetch(`${API_BASE}/milestones/${encodeURIComponent(id)}`);
+	async fetchMilestone(id: string, projectKey?: string): Promise<Milestone> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/milestones/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/milestones/${encodeURIComponent(id)}`;
+		const response = await fetch(url);
 		if (!response.ok) {
 			throw new Error("Failed to fetch milestone");
 		}
 		return response.json();
 	}
 
-	async createMilestone(title: string, description?: string): Promise<Milestone> {
-		const response = await fetch(`${API_BASE}/milestones`, {
+	async createMilestone(title: string, description?: string, projectKey?: string): Promise<Milestone> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode() ? `${API_BASE}/global/milestones` : `${API_BASE}/milestones`;
+		const response = await fetch(url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ title, description }),
+			body: JSON.stringify(this.isGlobalMode() ? { title, description, projectKey: key } : { title, description }),
 		});
 		if (!response.ok) {
 			const data = await response.json().catch(() => ({}));
@@ -494,8 +659,13 @@ export class ApiClient {
 	async updateMilestone(
 		id: string,
 		title: string,
+		projectKey?: string,
 	): Promise<{ success: boolean; milestone?: Milestone | null; message?: string }> {
-		const response = await fetch(`${API_BASE}/milestones/${encodeURIComponent(id)}`, {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/milestones/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/milestones/${encodeURIComponent(id)}`;
+		const response = await fetch(url, {
 			method: "PUT",
 			headers: {
 				"Content-Type": "application/json",
@@ -512,8 +682,13 @@ export class ApiClient {
 	async removeMilestone(
 		id: string,
 		options: { taskHandling?: "clear" | "keep" | "reassign"; reassignTo?: string } = {},
+		projectKey?: string,
 	): Promise<{ success: boolean; message?: string }> {
-		const response = await fetch(`${API_BASE}/milestones/${encodeURIComponent(id)}`, {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/milestones/${key}/${encodeURIComponent(id)}`
+			: `${API_BASE}/milestones/${encodeURIComponent(id)}`;
+		const response = await fetch(url, {
 			method: "DELETE",
 			headers: {
 				"Content-Type": "application/json",
@@ -527,8 +702,12 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async archiveMilestone(id: string): Promise<{ success: boolean; milestone?: Milestone | null }> {
-		const response = await fetch(`${API_BASE}/milestones/${encodeURIComponent(id)}/archive`, {
+	async archiveMilestone(id: string, projectKey?: string): Promise<{ success: boolean; milestone?: Milestone | null }> {
+		const key = this.requireProjectKey(projectKey);
+		const url = this.isGlobalMode()
+			? `${API_BASE}/global/milestones/${key}/${encodeURIComponent(id)}/archive`
+			: `${API_BASE}/milestones/${encodeURIComponent(id)}/archive`;
+		const response = await fetch(url, {
 			method: "POST",
 		});
 		if (!response.ok) {
@@ -541,13 +720,26 @@ export class ApiClient {
 	async fetchStatistics(): Promise<
 		TaskStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
 	> {
+		const params = new URLSearchParams();
+		this.appendProjectsParam(params);
+		const url = `${this.apiRoot()}/statistics${params.toString() ? `?${params.toString()}` : ""}`;
 		return this.fetchJson<
 			TaskStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
-		>(`${API_BASE}/statistics`);
+		>(url);
 	}
 
-	async checkStatus(): Promise<InitializationStatus> {
-		return this.fetchJson<InitializationStatus>(`${API_BASE}/status`);
+	async checkStatus(): Promise<ServerStatus> {
+		const status = await this.fetchJson<ServerStatus>(`${API_BASE}/status`);
+		if (isGlobalStatus(status)) {
+			this.serverMode = "global";
+		} else {
+			this.serverMode = "project";
+		}
+		return status;
+	}
+
+	async fetchProjects(): Promise<ProjectStatusSummary[]> {
+		return this.fetchJson<ProjectStatusSummary[]>(`${API_BASE}/global/projects`);
 	}
 
 	async initializeProject(options: {

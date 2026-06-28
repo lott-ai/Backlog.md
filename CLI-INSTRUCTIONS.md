@@ -220,6 +220,20 @@ Manage task dependencies to create execution sequences and prevent circular rela
 |-------------|------------------------------------------------------|
 | Web interface | `backlog browser` (launches web UI on port 6420) |
 | Web custom port | `backlog browser --port 8080 --no-open` |
+| Port from environment | `PORT=4567 backlog browser` (also used by [portless](https://github.com/vercel/portless)) |
+| Global dashboard | `backlog global browser` (cross-project UI, default port 6421) |
+| List registered projects | `backlog global projects list` |
+| Register a project | `backlog global projects add ~/path/to/project` |
+| Scan for projects | `backlog global projects scan --paths ~/github.com` |
+
+Port precedence for `backlog browser` and `backlog global browser`: `--port` > `PORT` env > config `defaultPort` > built-in fallback (6420 project, 6421 global).
+
+With portless, use `--no-open` so Backlog does not also open `http://localhost:<port>`:
+
+```bash
+portless backlog browser --no-open
+portless myapp backlog global browser --no-open
+```
 
 To keep the Web UI running in the background with auto-start on boot, see [Running Backlog.md as a Service](backlog/docs/doc-003%20-%20Running-Backlog-Browser-as-a-Service.md).
 

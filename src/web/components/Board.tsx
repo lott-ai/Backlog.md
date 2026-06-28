@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { type Milestone, type Task } from '../../types';
-import { apiClient, type ReorderTaskPayload } from '../lib/api';
+import { apiClient, type ReorderTaskPayload, taskProjectKey } from '../lib/api';
 import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode } from '../lib/lanes';
 import { collectAvailableLabels, labelsToLower } from '../../utils/label-filter';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
@@ -267,7 +267,8 @@ const Board: React.FC<BoardProps> = ({
 
   const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
     try {
-      await apiClient.updateTask(taskId, updates);
+      const task = tasks.find((item) => item.id === taskId);
+      await apiClient.updateTask(taskId, updates, taskProjectKey(task ?? {}));
       // Refresh data to reflect the changes
       if (onRefreshData) {
         await onRefreshData();
@@ -280,7 +281,8 @@ const Board: React.FC<BoardProps> = ({
 
   const handleTaskReorder = async (payload: ReorderTaskPayload) => {
     try {
-      await apiClient.reorderTask(payload);
+      const task = tasks.find((item) => item.id === payload.taskId);
+      await apiClient.reorderTask({ ...payload, projectKey: taskProjectKey(task ?? {}) }, taskProjectKey(task ?? {}));
       // Refresh data to reflect the changes
       if (onRefreshData) {
         await onRefreshData();
@@ -468,11 +470,10 @@ const Board: React.FC<BoardProps> = ({
               <button
                 type="button"
                 onClick={() => onLaneChange('none')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  laneMode === 'none'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${laneMode === 'none'
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
+                  }`}
               >
                 All Tasks
               </button>
@@ -481,13 +482,12 @@ const Board: React.FC<BoardProps> = ({
                 onClick={() => onLaneChange('milestone')}
                 disabled={!hasTasksWithMilestones}
                 title={!hasTasksWithMilestones ? 'No tasks have milestones. Assign milestones to tasks first.' : 'Group tasks by milestone'}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  !hasTasksWithMilestones
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${!hasTasksWithMilestones
                     ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
                     : laneMode === 'milestone'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
+                  }`}
               >
                 Milestone
               </button>

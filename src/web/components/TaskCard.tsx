@@ -1,5 +1,6 @@
 import React from 'react';
-import { type Task } from '../../types';
+import { type Task, type ProjectRef } from '../../types';
+import { ProjectBadge } from './ProjectBadge';
 
 interface TaskCardProps {
   task: Task;
@@ -94,13 +95,11 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onEdit, onDragStart, onDragEn
       )}
 
       <div
-        className={`bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md p-3 mb-2 transition-all duration-200 ${
-          isFromOtherBranch 
-            ? 'opacity-75 cursor-not-allowed border-dashed' 
+        className={`bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md p-3 mb-2 transition-all duration-200 ${isFromOtherBranch
+            ? 'opacity-75 cursor-not-allowed border-dashed'
             : 'cursor-pointer hover:shadow-md dark:hover:shadow-lg hover:border-stone-500 dark:hover:border-stone-400'
-        } ${getPriorityClass(task.priority)} ${
-          isDragging ? 'opacity-50 transform rotate-2 scale-105' : ''
-        }`}
+          } ${getPriorityClass(task.priority)} ${isDragging ? 'opacity-50 transform rotate-2 scale-105' : ''
+          }`}
         draggable={!isFromOtherBranch}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -132,13 +131,21 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onEdit, onDragStart, onDragEn
         </div>
 
         {/* Title */}
-        <h4 className={`font-semibold text-sm line-clamp-2 transition-colors duration-200 ${
-          isFromOtherBranch
+        <h4 className={`font-semibold text-sm line-clamp-2 transition-colors duration-200 ${isFromOtherBranch
             ? 'text-gray-600 dark:text-gray-400'
             : 'text-gray-900 dark:text-gray-100'
-        }`}>
+          }`}>
           {task.title}
         </h4>
+
+        {(task as Task & ProjectRef).projectKey && (
+          <div className="mt-2">
+            <ProjectBadge
+              projectName={(task as Task & ProjectRef).projectName}
+              projectKey={(task as Task & ProjectRef).projectKey}
+            />
+          </div>
+        )}
 
         {/* Labels - limit to 3 */}
         {task.labels.length > 0 && (

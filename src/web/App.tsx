@@ -14,17 +14,18 @@ import InitializationScreen from './components/InitializationScreen';
 import { SuccessToast } from './components/SuccessToast';
 import { ThemeProvider } from './contexts/ThemeContext';
 import {
-	type Decision,
-	type DecisionSearchResult,
-	type Document,
-	type DocumentSearchResult,
-	type BacklogConfig,
-	type Milestone,
-	type SearchResult,
-	type Task,
-	type TaskSearchResult,
+  type Decision,
+  type DecisionSearchResult,
+  type Document,
+  type DocumentSearchResult,
+  type BacklogConfig,
+  type Milestone,
+  type SearchResult,
+  type Task,
+  type TaskSearchResult,
 } from '../types';
-import { apiClient } from './lib/api';
+import { apiClient, isGlobalStatus, taskProjectKey } from './lib/api';
+import { ProjectFilterProvider, useProjectFilter } from './contexts/ProjectFilterContext';
 import type { DuplicateGroup } from '../utils/duplicate-detection';
 import { useHealthCheckContext } from './contexts/HealthCheckContext';
 import { getWebVersion } from './utils/version';
@@ -173,18 +174,20 @@ function App() {
   const [milestoneEntities, setMilestoneEntities] = useState<Milestone[]>([]);
   const [archivedMilestones, setArchivedMilestones] = useState<Milestone[]>([]);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
-  const [taskConfirmation, setTaskConfirmation] = useState<{task: Task, isDraft: boolean} | null>(null);
-  
+  const [taskConfirmation, setTaskConfirmation] = useState<{ task: Task, isDraft: boolean } | null>(null);
+
+  const [isGlobalMode, setIsGlobalMode] = useState(false);
+
   // Initialization state
   const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
-  
+
   // Centralized data state
   const [tasks, setTasks] = useState<Task[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
-  
+
   const { isOnline } = useHealthCheckContext();
   const previousOnlineRef = useRef<boolean | null>(null);
   const hasBeenRunningRef = useRef(false);
@@ -203,9 +206,15 @@ function App() {
     const checkInitStatus = async () => {
       try {
         const status = await apiClient.checkStatus();
-        setIsInitialized(status.initialized);
+        if (isGlobalStatus(status)) {
+          setIsGlobalMode(true);
+          setIsInitialized(true);
+          setProjectName('Global Dashboard');
+        } else {
+          setIsGlobalMode(false);
+          setIsInitialized(status.initialized);
+        }
       } catch (error) {
-        // If we can't check status, assume not initialized
         console.error('Failed to check initialization status:', error);
         setIsInitialized(false);
       }
@@ -230,23 +239,23 @@ function App() {
     const normalizedTasks =
       archivedMilestoneKeys && archivedMilestoneKeys.size > 0
         ? tasksList.map((task) => {
-            const canonicalMilestone = canonicalizeMilestone(task.milestone, milestoneAliases);
-            const key = milestoneKey(canonicalMilestone);
-            if (!key || !archivedMilestoneKeys.has(key)) {
-              if (task.milestone === canonicalMilestone) {
-                return task;
-              }
-              return { ...task, milestone: canonicalMilestone || undefined };
-            }
-            return { ...task, milestone: undefined };
-          })
-        : tasksList.map((task) => {
-            const canonicalMilestone = canonicalizeMilestone(task.milestone, milestoneAliases);
+          const canonicalMilestone = canonicalizeMilestone(task.milestone, milestoneAliases);
+          const key = milestoneKey(canonicalMilestone);
+          if (!key || !archivedMilestoneKeys.has(key)) {
             if (task.milestone === canonicalMilestone) {
               return task;
             }
             return { ...task, milestone: canonicalMilestone || undefined };
-          });
+          }
+          return { ...task, milestone: undefined };
+        })
+        : tasksList.map((task) => {
+          const canonicalMilestone = canonicalizeMilestone(task.milestone, milestoneAliases);
+          if (task.milestone === canonicalMilestone) {
+            return task;
+          }
+          return { ...task, milestone: canonicalMilestone || undefined };
+        });
     const docsList = documentResults.map((result) => result.document);
     const decisionsList = decisionResults.map((result) => result.decision);
 
@@ -276,7 +285,13 @@ function App() {
       setDuplicateGroups(duplicates);
       setStatuses(statusesData);
       setProjectName(configData.projectName);
-      setAvailableLabels(configData.labels || []);
+      const labelSet = new Set(configData.labels || []);
+      for (const task of tasksList) {
+        for (const label of task.labels ?? []) {
+          labelSet.add(label);
+        }
+      }
+      setAvailableLabels(Array.from(labelSet).sort((a, b) => a.localeCompare(b)));
       setConfig(configData);
       setMilestoneEntities(milestonesData);
       setArchivedMilestones(archivedMilestonesData);
@@ -356,7 +371,7 @@ function App() {
       }, 4000);
       return () => clearTimeout(timer);
     }
-    
+
     // Update the ref for next time
     previousOnlineRef.current = isOnline;
   }, [isOnline]);
@@ -393,7 +408,10 @@ function App() {
   // This fixes the bug where acceptance criteria disappears after save (GitHub #467)
   useEffect(() => {
     if (editingTask && showModal) {
-      const updatedTask = tasks.find(t => t.id === editingTask.id);
+      const updatedTask = tasks.find(t =>
+        t.id === editingTask.id &&
+        (!editingTask.projectKey || (t as Task & { projectKey?: string }).projectKey === editingTask.projectKey)
+      );
       if (updatedTask && updatedTask !== editingTask) {
         setEditingTask(updatedTask);
       }
@@ -407,23 +425,30 @@ function App() {
       if (event.data === "tasks-updated") {
         refreshData();
       } else if (event.data === "config-updated") {
-        // Reload statuses when config changes
         loadAllData();
+      } else {
+        try {
+          const payload = JSON.parse(String(event.data)) as { type?: string };
+          if (payload.type === "tasks-updated") {
+            refreshData();
+          }
+        } catch {
+          // ignore non-json websocket messages
+        }
       }
     };
     return () => ws.close();
   }, [refreshData, loadAllData]);
 
   const handleSubmitTask = async (taskData: Partial<Task>) => {
-    // Don't catch errors here - let TaskDetailsModal handle them
+    const projectKey = editingTask ? taskProjectKey(editingTask) : taskProjectKey(taskData);
     if (editingTask) {
-      await apiClient.updateTask(editingTask.id, taskData);
+      await apiClient.updateTask(editingTask.id, taskData, projectKey);
     } else {
-      // Set status to 'Draft' if in draft mode
       const finalTaskData = isDraftMode
         ? { ...taskData, status: 'Draft' }
         : taskData;
-      const createdTask = await apiClient.createTask(finalTaskData as Omit<Task, "id" | "createdDate">);
+      const createdTask = await apiClient.createTask(finalTaskData as Omit<Task, "id" | "createdDate">, projectKey);
 
       // Show task creation confirmation
       setTaskConfirmation({ task: createdTask, isDraft: isDraftMode });
@@ -443,9 +468,9 @@ function App() {
     }
   };
 
-  const handleArchiveTask = async (taskId: string) => {
+  const handleArchiveTask = async (taskId: string, projectKey?: string) => {
     try {
-      await apiClient.archiveTask(taskId);
+      await apiClient.archiveTask(taskId, projectKey ?? editingTask?.projectKey);
       handleCloseModal();
       await refreshData();
     } catch (error) {
@@ -475,32 +500,137 @@ function App() {
 
   return (
     <ThemeProvider>
-      <BrowserRouter>
-        <Routes>
-            <Route
-            path="/"
+      <ProjectFilterProvider isGlobalMode={isGlobalMode}>
+        <AppRoutes
+          projectName={projectName}
+          showSuccessToast={showSuccessToast}
+          onDismissToast={() => setShowSuccessToast(false)}
+          tasks={tasks}
+          docs={docs}
+          decisions={decisions}
+          isLoading={isLoading}
+          onRefreshData={refreshData}
+          statuses={statuses}
+          milestones={milestones}
+          availableLabels={availableLabels}
+          milestoneEntities={milestoneEntities}
+          archivedMilestones={archivedMilestones}
+          isGlobalMode={isGlobalMode}
+          showModal={showModal}
+          editingTask={editingTask}
+          isDraftMode={isDraftMode}
+          taskConfirmation={taskConfirmation}
+          onNewTask={handleNewTask}
+          onNewDraft={handleNewDraft}
+          onEditTask={handleEditTask}
+          onCloseModal={handleCloseModal}
+          onSubmitTask={handleSubmitTask}
+          onArchiveTask={handleArchiveTask}
+          config={config}
+          duplicateGroups={duplicateGroups}
+          onDismissTaskConfirmation={() => setTaskConfirmation(null)}
+        />
+      </ProjectFilterProvider>
+    </ThemeProvider>
+  );
+}
+
+function AppRoutes({
+  projectName,
+  showSuccessToast,
+  onDismissToast,
+  tasks,
+  docs,
+  decisions,
+  isLoading,
+  onRefreshData,
+  statuses,
+  milestones,
+  availableLabels,
+  milestoneEntities,
+  archivedMilestones,
+  isGlobalMode,
+  showModal,
+  editingTask,
+  isDraftMode,
+  taskConfirmation,
+  onNewTask,
+  onNewDraft,
+  onEditTask,
+  onCloseModal,
+  onSubmitTask,
+  onArchiveTask,
+  config,
+  duplicateGroups,
+  onDismissTaskConfirmation,
+}: {
+  projectName: string;
+  showSuccessToast: boolean;
+  onDismissToast: () => void;
+  tasks: Task[];
+  docs: Document[];
+  decisions: Decision[];
+  isLoading: boolean;
+  onRefreshData: () => Promise<void>;
+  statuses: string[];
+  milestones: string[];
+  availableLabels: string[];
+  milestoneEntities: Milestone[];
+  archivedMilestones: Milestone[];
+  isGlobalMode: boolean;
+  showModal: boolean;
+  editingTask: Task | null;
+  isDraftMode: boolean;
+  taskConfirmation: { task: Task; isDraft: boolean } | null;
+  onNewTask: () => void;
+  onNewDraft: () => void;
+  onEditTask: (task: Task) => void;
+  onCloseModal: () => void;
+  onSubmitTask: (taskData: Partial<Task>) => Promise<void>;
+  onArchiveTask: (taskId: string, projectKey?: string) => Promise<void>;
+  config: BacklogConfig | null;
+  duplicateGroups: DuplicateGroup[];
+  onDismissTaskConfirmation: () => void;
+}) {
+  const { selectedProjectKeys, filterByProject } = useProjectFilter();
+  const filteredTasks = filterByProject(tasks);
+  const filteredDocs = filterByProject(docs);
+  const filteredDecisions = filterByProject(decisions);
+
+  useEffect(() => {
+    if (isGlobalMode) {
+      void onRefreshData();
+    }
+  }, [isGlobalMode, selectedProjectKeys, onRefreshData]);
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Layout
+              projectName={projectName}
+              isGlobalMode={isGlobalMode}
+              showSuccessToast={showSuccessToast}
+              onDismissToast={onDismissToast}
+              tasks={filteredTasks}
+              docs={filteredDocs}
+              decisions={filteredDecisions}
+              isLoading={isLoading}
+              onRefreshData={onRefreshData}
+              duplicateGroups={duplicateGroups}
+            />
+          }
+        >
+          <Route
+            index
             element={
-              <Layout
-                projectName={projectName}
-                showSuccessToast={showSuccessToast}
-                onDismissToast={() => setShowSuccessToast(false)}
-                tasks={tasks}
-                docs={docs}
-                decisions={decisions}
-                isLoading={isLoading}
-                onRefreshData={refreshData}
-                duplicateGroups={duplicateGroups}
-              />
-            }
-          >
-            <Route
-              index
-              element={
-                <BoardPage
-                  onEditTask={handleEditTask}
-                  onNewTask={handleNewTask}
-                tasks={tasks}
-                onRefreshData={refreshData}
+              <BoardPage
+                onEditTask={onEditTask}
+                onNewTask={onNewTask}
+                tasks={filteredTasks}
+                onRefreshData={onRefreshData}
                 statuses={statuses}
                 milestones={milestones}
                 availableLabels={availableLabels}
@@ -508,79 +638,80 @@ function App() {
                 archivedMilestones={archivedMilestones}
                 isLoading={isLoading}
                 hideEmptyColumns={config?.hideEmptyColumns ?? false}
+                isGlobalMode={isGlobalMode}
               />
             }
           />
-            <Route
-              path="tasks"
-              element={
-	                <TaskList
-	                  onEditTask={handleEditTask}
-	                  onNewTask={handleNewTask}
-	                  tasks={tasks}
-	                  availableStatuses={statuses}
-	                  availableLabels={availableLabels}
-	                  availableMilestones={milestones}
-	                  milestoneEntities={milestoneEntities}
-	                  archivedMilestones={archivedMilestones}
-	                  onRefreshData={refreshData}
-	                />
-	              }
-	            />
-            <Route
-              path="milestones"
-              element={
+          <Route
+            path="tasks"
+            element={
+              <TaskList
+                onEditTask={onEditTask}
+                onNewTask={onNewTask}
+                tasks={filteredTasks}
+                availableStatuses={statuses}
+                availableLabels={availableLabels}
+                availableMilestones={milestones}
+                milestoneEntities={milestoneEntities}
+                archivedMilestones={archivedMilestones}
+                onRefreshData={onRefreshData}
+              />
+            }
+          />
+          <Route
+            path="milestones"
+            element={
               <MilestonesPage
-                tasks={tasks}
+                tasks={filteredTasks}
                 statuses={statuses}
                 milestoneEntities={milestoneEntities}
                 archivedMilestones={archivedMilestones}
-                onEditTask={handleEditTask}
-                onRefreshData={refreshData}
+                onEditTask={onEditTask}
+                onRefreshData={onRefreshData}
+                isGlobalMode={isGlobalMode}
               />
             }
           />
-            <Route path="drafts" element={<DraftsList onEditTask={handleEditTask} onNewDraft={handleNewDraft} />} />
-            <Route path="documentation" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} />} />
-            <Route path="documentation/:id" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} />} />
-            <Route path="documentation/:id/:title" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} />} />
-            <Route path="decisions" element={<DecisionDetail decisions={decisions} onRefreshData={refreshData} />} />
-            <Route path="decisions/:id" element={<DecisionDetail decisions={decisions} onRefreshData={refreshData} />} />
-            <Route path="decisions/:id/:title" element={<DecisionDetail decisions={decisions} onRefreshData={refreshData} />} />
-            <Route path="statistics" element={<Statistics tasks={tasks} isLoading={isLoading} onEditTask={handleEditTask} projectName={projectName} />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
+          <Route path="drafts" element={<DraftsList onEditTask={onEditTask} onNewDraft={onNewDraft} />} />
+          <Route path="documentation" element={<DocumentationDetail docs={filteredDocs} onRefreshData={onRefreshData} />} />
+          <Route path="documentation/:id" element={<DocumentationDetail docs={filteredDocs} onRefreshData={onRefreshData} />} />
+          <Route path="documentation/:id/:title" element={<DocumentationDetail docs={filteredDocs} onRefreshData={onRefreshData} />} />
+          <Route path="decisions" element={<DecisionDetail decisions={filteredDecisions} onRefreshData={onRefreshData} />} />
+          <Route path="decisions/:id" element={<DecisionDetail decisions={filteredDecisions} onRefreshData={onRefreshData} />} />
+          <Route path="decisions/:id/:title" element={<DecisionDetail decisions={filteredDecisions} onRefreshData={onRefreshData} />} />
+          <Route path="statistics" element={<Statistics tasks={filteredTasks} isLoading={isLoading} onEditTask={onEditTask} projectName={projectName} />} />
+          <Route path="settings" element={<Settings isGlobalMode={isGlobalMode} />} />
+        </Route>
+      </Routes>
 
-        <TaskDetailsModal
-          task={editingTask || undefined}
-          isOpen={showModal}
-          onClose={handleCloseModal}
-          onSaved={refreshData}
-          onSubmit={handleSubmitTask}
-          onArchive={editingTask ? () => handleArchiveTask(editingTask.id) : undefined}
-          availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
-          availableMilestones={milestones}
-          milestoneEntities={milestoneEntities}
-          archivedMilestoneEntities={archivedMilestones}
-          isDraftMode={isDraftMode}
-          definitionOfDoneDefaults={config?.definitionOfDone ?? []}
+      <TaskDetailsModal
+        task={editingTask || undefined}
+        isOpen={showModal}
+        onClose={onCloseModal}
+        onSaved={onRefreshData}
+        onSubmit={onSubmitTask}
+        onArchive={editingTask ? () => onArchiveTask(editingTask.id, taskProjectKey(editingTask)) : undefined}
+        availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
+        availableMilestones={milestones}
+        milestoneEntities={milestoneEntities}
+        archivedMilestoneEntities={archivedMilestones}
+        isDraftMode={isDraftMode}
+        definitionOfDoneDefaults={config?.definitionOfDone ?? []}
+        isGlobalMode={isGlobalMode}
+      />
+
+      {taskConfirmation && (
+        <SuccessToast
+          message={`${taskConfirmation.isDraft ? 'Draft' : 'Task'} "${taskConfirmation.task.title}" created successfully! (${taskConfirmation.task.id.replace('task-', '')})`}
+          onDismiss={onDismissTaskConfirmation}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
         />
-
-        {/* Task Creation Confirmation Toast */}
-        {taskConfirmation && (
-          <SuccessToast
-            message={`${taskConfirmation.isDraft ? 'Draft' : 'Task'} "${taskConfirmation.task.title}" created successfully! (${taskConfirmation.task.id.replace('task-', '')})`}
-            onDismiss={() => setTaskConfirmation(null)}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-          />
-        )}
-      </BrowserRouter>
-    </ThemeProvider>
+      )}
+    </BrowserRouter>
   );
 }
 
