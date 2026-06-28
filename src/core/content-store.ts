@@ -109,8 +109,13 @@ export class ContentStore {
 
 		let tasks = this.cachedTasks;
 		if (filter?.status) {
-			const statusLower = filter.status.toLowerCase();
-			tasks = tasks.filter((task) => task.status.toLowerCase() === statusLower);
+			const statusFilters = (Array.isArray(filter.status) ? filter.status : [filter.status])
+				.map((status) => status.trim().toLowerCase())
+				.filter((status) => status.length > 0);
+			if (statusFilters.length > 0) {
+				const allowedStatuses = new Set(statusFilters);
+				tasks = tasks.filter((task) => allowedStatuses.has(task.status.toLowerCase()));
+			}
 		}
 		if (filter?.assignee) {
 			const assignee = filter.assignee;

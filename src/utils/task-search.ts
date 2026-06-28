@@ -11,10 +11,40 @@ import { matchesModifiedFileFilters, normalizeModifiedFileFilters } from "./modi
 
 export type LabelMatchMode = "any" | "all";
 
+export function normalizeMultiValueFilter(value?: string | string[]): string[] | undefined {
+	if (!value) {
+		return undefined;
+	}
+	const values = Array.isArray(value) ? value : [value];
+	const normalized = values.map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0);
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+export const normalizeStatusFilter = normalizeMultiValueFilter;
+
+export function resolveConfiguredStatuses(values: string[], configuredStatuses: string[]): string[] {
+	if (values.length === 0) {
+		return [];
+	}
+	const canonicalByLower = new Map(configuredStatuses.map((status) => [status.toLowerCase(), status]));
+	const resolved: string[] = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const canonical = canonicalByLower.get(value.toLowerCase()) ?? value;
+		const key = canonical.toLowerCase();
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		resolved.push(canonical);
+	}
+	return resolved;
+}
+
 export interface TaskSearchOptions {
 	query?: string;
-	status?: string;
-	priority?: "high" | "medium" | "low";
+	status?: string | string[];
+	priority?: string | string[];
 	labels?: string[];
 	labelMatch?: LabelMatchMode;
 	modifiedFiles?: string[];
@@ -22,16 +52,16 @@ export interface TaskSearchOptions {
 
 export interface SharedTaskFilterOptions {
 	query?: string;
-	priority?: "high" | "medium" | "low";
+	priority?: string | string[];
 	labels?: string[];
 	labelMatch?: LabelMatchMode;
 	modifiedFiles?: string[];
-	milestone?: string;
+	milestone?: string | string[];
 	resolveMilestoneLabel?: (milestone: string) => string;
 }
 
 export interface TaskFilterOptions extends SharedTaskFilterOptions {
-	status?: string;
+	status?: string | string[];
 }
 
 export interface TaskSearchIndex {
@@ -170,16 +200,18 @@ export function createTaskSearchIndex(tasks: Task[]): TaskSearchIndex {
 				results = [...searchableTasks];
 			}
 
-			// Apply status filter
-			if (options.status) {
-				const statusLower = options.status.toLowerCase();
-				results = results.filter((t) => t.statusLower === statusLower);
+			// Apply status filter (match any selected status)
+			const statusFilters = normalizeStatusFilter(options.status);
+			if (statusFilters && statusFilters.length > 0) {
+				const allowedStatuses = new Set(statusFilters);
+				results = results.filter((t) => allowedStatuses.has(t.statusLower));
 			}
 
-			// Apply priority filter
-			if (options.priority) {
-				const priorityLower = options.priority.toLowerCase();
-				results = results.filter((t) => t.priorityLower === priorityLower);
+			// Apply priority filter (match any selected priority)
+			const priorityFilters = normalizeMultiValueFilter(options.priority);
+			if (priorityFilters && priorityFilters.length > 0) {
+				const allowedPriorities = new Set(priorityFilters);
+				results = results.filter((t) => t.priorityLower && allowedPriorities.has(t.priorityLower));
 			}
 
 			// Apply label filters. Interactive UI filters match any selected
@@ -210,32 +242,34 @@ export function createTaskSearchIndex(tasks: Task[]): TaskSearchIndex {
 
 function applyMilestoneFilter(
 	tasks: Task[],
-	milestone: string,
+	milestone: string | string[],
 	resolveMilestoneLabel?: (milestone: string) => string,
 ): Task[] {
-	const normalizedMilestone = milestone.trim().toLowerCase();
-	if (!normalizedMilestone) {
+	const milestones = normalizeMultiValueFilter(milestone);
+	if (!milestones || milestones.length === 0) {
 		return tasks;
 	}
-	if (normalizedMilestone === NO_MILESTONE_FILTER_VALUE) {
-		return tasks.filter((task) => !task.milestone?.trim());
-	}
+
+	const allowedMilestones = new Set(milestones);
+	const includeUnassigned = allowedMilestones.has(NO_MILESTONE_FILTER_VALUE.toLowerCase());
 
 	return tasks.filter((task) => {
-		if (!task.milestone) {
-			return false;
+		if (!task.milestone?.trim()) {
+			return includeUnassigned;
 		}
 		const value = resolveMilestoneLabel ? resolveMilestoneLabel(task.milestone) : task.milestone;
-		return value.trim().toLowerCase() === normalizedMilestone;
+		return allowedMilestones.has(value.trim().toLowerCase());
 	});
 }
 
 export function applyTaskFilters(tasks: Task[], options: TaskFilterOptions, index?: TaskSearchIndex): Task[] {
 	const query = options.query?.trim() ?? "";
+	const statusFilters = normalizeMultiValueFilter(options.status);
+	const priorityFilters = normalizeMultiValueFilter(options.priority);
 	const hasBaseFilters = Boolean(
 		query ||
-			options.status ||
-			options.priority ||
+			(statusFilters && statusFilters.length > 0) ||
+			(priorityFilters && priorityFilters.length > 0) ||
 			(options.labels && options.labels.length > 0) ||
 			(options.modifiedFiles && options.modifiedFiles.length > 0),
 	);

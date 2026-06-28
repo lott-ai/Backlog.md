@@ -24,13 +24,24 @@ describe("unified view filter state", () => {
 		});
 
 		expect(filters.searchQuery).toBe("sync");
-		expect(filters.statusFilter).toBe("In Progress");
-		expect(filters.priorityFilter).toBe("high");
+		expect(filters.statusFilter).toEqual(["In Progress"]);
+		expect(filters.priorityFilter).toEqual(["high"]);
 		expect(filters.labelFilter).toEqual(["backend"]);
 		expect(filters.labelMatch).toBe("all");
-		expect(filters.milestoneFilter).toBe("Release 1");
+		expect(filters.milestoneFilter).toEqual(["Release 1"]);
 		expect(filters.limit).toBe(2);
 		expect(filters.labelFilter).not.toBe(labels);
+	});
+
+	it("initializes multiple status filters from options", () => {
+		const filters = createUnifiedViewFilters(
+			{
+				status: ["To Do", "In Progress"],
+			},
+			["To Do", "In Progress", "Done"],
+		);
+
+		expect(filters.statusFilter).toEqual(["To Do", "In Progress"]);
 	});
 
 	it("preserves milestone filter when merging filter updates", () => {
@@ -43,17 +54,17 @@ describe("unified view filter state", () => {
 
 		const updated: UnifiedViewFilters = {
 			searchQuery: "api",
-			statusFilter: "To Do",
-			priorityFilter: "",
+			statusFilter: ["To Do"],
+			priorityFilter: [],
 			labelFilter: ["infra"],
-			milestoneFilter: "Sprint 7",
+			milestoneFilter: ["Sprint 7"],
 		};
 
 		const merged = mergeUnifiedViewFilters(initial, updated);
-		expect(merged.milestoneFilter).toBe("Sprint 7");
+		expect(merged.milestoneFilter).toEqual(["Sprint 7"]);
 		expect(merged.labelFilter).toEqual(["infra"]);
 		expect(merged.labelFilter).not.toBe(updated.labelFilter);
-		expect(initial.milestoneFilter).toBe("");
+		expect(initial.milestoneFilter).toEqual([]);
 	});
 
 	it("preserves label match mode when merging unrelated filter updates", () => {
@@ -66,10 +77,10 @@ describe("unified view filter state", () => {
 
 		const updated: UnifiedViewFilters = {
 			searchQuery: "api auth",
-			statusFilter: "",
-			priorityFilter: "high",
+			statusFilter: [],
+			priorityFilter: ["high"],
 			labelFilter: ["frontend", "bug"],
-			milestoneFilter: "",
+			milestoneFilter: [],
 		};
 
 		const merged = mergeUnifiedViewFilters(initial, updated);
@@ -85,10 +96,10 @@ describe("unified view filter state", () => {
 
 		const updated: UnifiedViewFilters = {
 			searchQuery: "auth",
-			statusFilter: "",
-			priorityFilter: "",
+			statusFilter: [],
+			priorityFilter: [],
 			labelFilter: ["frontend", "bug"],
-			milestoneFilter: "",
+			milestoneFilter: [],
 		};
 
 		const merged = mergeUnifiedViewFilters(initial, updated);
@@ -103,11 +114,11 @@ describe("unified view filter state", () => {
 
 		const updated: UnifiedViewFilters = {
 			searchQuery: "",
-			statusFilter: "",
-			priorityFilter: "",
+			statusFilter: [],
+			priorityFilter: [],
 			labelFilter: ["frontend", "bug"],
 			labelMatch: "any",
-			milestoneFilter: "",
+			milestoneFilter: [],
 		};
 
 		const merged = mergeUnifiedViewFilters(initial, updated);
@@ -125,9 +136,9 @@ describe("unified view filter state", () => {
 
 		const shared = createKanbanSharedFilters(unified);
 		expect(shared.searchQuery).toBe("sync");
-		expect(shared.priorityFilter).toBe("high");
+		expect(shared.priorityFilter).toEqual(["high"]);
 		expect(shared.labelFilter).toEqual(["ui"]);
-		expect(shared.milestoneFilter).toBe("Sprint 1");
+		expect(shared.milestoneFilter).toEqual(["Sprint 1"]);
 		expect(shared.limit).toBeUndefined();
 		expect("statusFilter" in shared).toBe(false);
 	});
@@ -243,9 +254,9 @@ describe("unified view filter state", () => {
 
 		const results = filterTasksForKanban(tasks, {
 			searchQuery: "",
-			priorityFilter: "",
+			priorityFilter: [],
 			labelFilter: [],
-			milestoneFilter: "",
+			milestoneFilter: [],
 			limit: 1,
 		}).map((task) => task.id);
 
@@ -296,9 +307,9 @@ describe("unified view filter state", () => {
 
 		const sharedFilters = {
 			searchQuery: "",
-			priorityFilter: "high",
+			priorityFilter: ["high"],
 			labelFilter: ["ui"],
-			milestoneFilter: "Sprint 1",
+			milestoneFilter: ["Sprint 1"],
 		};
 
 		const kanbanResults = filterTasksForKanban(tasks, sharedFilters, resolveMilestoneLabel).map((task) => task.id);
@@ -309,7 +320,7 @@ describe("unified view filter state", () => {
 			resolveMilestoneLabel,
 		}).map((task) => task.id);
 		const listStatusResults = applyTaskFilters(tasks, {
-			status: "To Do",
+			status: ["To Do"],
 			priority: "high",
 			labels: ["ui"],
 			milestone: "Sprint 1",
@@ -366,9 +377,9 @@ describe("unified view filter state", () => {
 
 		const sharedFilters = {
 			searchQuery: "",
-			priorityFilter: "",
+			priorityFilter: [],
 			labelFilter: [],
-			milestoneFilter: NO_MILESTONE_FILTER_VALUE,
+			milestoneFilter: [NO_MILESTONE_FILTER_VALUE],
 		};
 
 		const kanbanResults = filterTasksForKanban(tasks, sharedFilters).map((task) => task.id);

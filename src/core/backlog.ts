@@ -309,8 +309,13 @@ export class Core {
 		}
 		let result = tasks;
 		if (filters.status) {
-			const statusLower = filters.status.toLowerCase();
-			result = result.filter((task) => (task.status ?? "").toLowerCase() === statusLower);
+			const statusFilters = (Array.isArray(filters.status) ? filters.status : [filters.status])
+				.map((status) => status.trim().toLowerCase())
+				.filter((status) => status.length > 0);
+			if (statusFilters.length > 0) {
+				const allowedStatuses = new Set(statusFilters);
+				result = result.filter((task) => allowedStatuses.has((task.status ?? "").toLowerCase()));
+			}
 		}
 		if (filters.assignee) {
 			const assigneeLower = filters.assignee.toLowerCase();

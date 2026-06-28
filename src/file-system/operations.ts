@@ -449,8 +449,13 @@ export class FileSystem {
 		}
 
 		if (filter?.status) {
-			const statusLower = filter.status.toLowerCase();
-			tasks = tasks.filter((t) => t.status.toLowerCase() === statusLower);
+			const statusFilters = (Array.isArray(filter.status) ? filter.status : [filter.status])
+				.map((status) => status.trim().toLowerCase())
+				.filter((status) => status.length > 0);
+			if (statusFilters.length > 0) {
+				const allowedStatuses = new Set(statusFilters);
+				tasks = tasks.filter((t) => allowedStatuses.has(t.status.toLowerCase()));
+			}
 		}
 
 		if (filter?.assignee) {

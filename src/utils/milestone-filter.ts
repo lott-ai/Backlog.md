@@ -1,8 +1,24 @@
 import Fuse from "fuse.js";
 import type { Milestone } from "../types/index.ts";
+import { formatMultiSelectSummary } from "./label-filter.ts";
 
 export const NO_MILESTONE_FILTER_VALUE = "\u0000no-milestone";
 export const NO_MILESTONE_FILTER_LABEL = "No milestone";
+
+export function milestoneValuesToPickerLabels(values: string[]): string[] {
+	return values.map((value) => (value === NO_MILESTONE_FILTER_VALUE ? NO_MILESTONE_FILTER_LABEL : value));
+}
+
+export function milestonePickerLabelsToValues(labels: string[]): string[] {
+	return labels.map((label) => (label === NO_MILESTONE_FILTER_LABEL ? NO_MILESTONE_FILTER_VALUE : label));
+}
+
+export function formatMilestoneFilterSummary(values: string[], fallback = "All"): string {
+	if (!values.length) {
+		return fallback;
+	}
+	return formatMultiSelectSummary(milestoneValuesToPickerLabels(values), fallback);
+}
 
 interface MilestoneCandidate {
 	value: string;

@@ -35,6 +35,23 @@ export function collectAvailableLabels(tasks: Task[], configured: string[] = [])
 }
 
 /**
+ * Build a short summary for a multi-select filter control.
+ */
+export function formatMultiSelectSummary(selected: string[], fallback = "All"): string {
+	if (!selected || selected.length === 0) {
+		return fallback;
+	}
+	if (selected.length === 1) {
+		return selected[0] ?? fallback;
+	}
+	if (selected.length === 2) {
+		return `${selected[0]}, ${selected[1]}`;
+	}
+	const remaining = selected.length - 2;
+	return `${selected[0]}, ${selected[1]} +${remaining}`;
+}
+
+/**
  * Build a short, footer-friendly summary for the current label filter selection.
  * Examples:
  * - [] => "Labels: All"
@@ -46,14 +63,7 @@ export function formatLabelSummary(selected: string[]): string {
 	if (!selected || selected.length === 0) {
 		return "Labels: All";
 	}
-	if (selected.length === 1) {
-		return `Labels: ${selected[0]}`;
-	}
-	if (selected.length === 2) {
-		return `Labels: ${selected[0]}, ${selected[1]}`;
-	}
-	const remaining = selected.length - 2;
-	return `Labels: ${selected[0]}, ${selected[1]} +${remaining}`;
+	return `Labels: ${formatMultiSelectSummary(selected, "All")}`;
 }
 
 export function labelsToLower(labels: string[]): string[] {
