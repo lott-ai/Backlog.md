@@ -79,6 +79,17 @@ describe("CLI Priority Filtering", () => {
 		expect(result.stderr.toString()).toContain("Valid values are: priority, id");
 	});
 
+	test("task list combines multiple status filters", async () => {
+		const result = await $`bun run cli task list --status "To Do,In Progress" --plain`.quiet();
+		expect(result.exitCode).toBe(0);
+
+		const output = result.stdout.toString();
+		if (output.includes("task-")) {
+			expect(output).toMatch(/To Do:|In Progress:/);
+			expect(output).not.toMatch(/Done:/);
+		}
+	});
+
 	test("task list combines priority filter with status filter", async () => {
 		const result = await $`bun run cli task list --priority high --status "To Do" --plain`.quiet();
 		expect(result.exitCode).toBe(0);

@@ -2012,7 +2012,11 @@ addHelpSchema(taskCmd.command("list"), {
 	reads: "Local editable tasks from the configured backlog directory",
 	required: [],
 	optional: [
-		{ name: "status", type: statusType, description: "Filter by task status; case-insensitive" },
+		{
+			name: "status",
+			type: statusType,
+			description: "Filter by task status; repeat --status or use comma-separated values",
+		},
 		{ name: "assignee", type: "Assignee", description: "Filter by @name" },
 		{ name: "milestone", type: "Milestone ID or title", description: "Closest case-insensitive match" },
 		{ name: "parent", type: "Task ID", description: "Show subtasks of a parent task" },
@@ -2029,12 +2033,17 @@ addHelpSchema(taskCmd.command("list"), {
 	output: "Interactive task list or plain text with --plain",
 	examples: [
 		'backlog task list --status "<todo status>" --plain',
+		'backlog task list --status "To Do,In Progress" --plain',
 		"backlog task list --parent {{TASK_ID:1}}",
 		'backlog task list --labels frontend,bug --search "login" --limit 10 --plain',
 	],
 })
 	.description("list tasks grouped by status")
-	.option("-s, --status <status>", "filter tasks by status (case-insensitive)")
+	.option(
+		"-s, --status <status>",
+		"filter tasks by status (case-insensitive; repeatable or comma-separated)",
+		createMultiValueAccumulator(),
+	)
 	.option("-a, --assignee <assignee>", "filter tasks by assignee")
 	.option("-m, --milestone <milestone>", "filter tasks by milestone (closest match, case-insensitive)")
 	.option("-p, --parent <taskId>", "filter tasks by parent task ID")
@@ -2056,8 +2065,9 @@ addHelpSchema(taskCmd.command("list"), {
 			core.disposeContentStore();
 		};
 		const baseFilters: TaskListFilter = {};
-		if (options.status) {
-			baseFilters.status = options.status;
+		const statusFilters = parseDelimitedStringList(options.status) ?? [];
+		if (statusFilters.length > 0) {
+			baseFilters.status = statusFilters.length === 1 ? statusFilters[0] : statusFilters;
 		}
 		if (options.assignee) {
 			baseFilters.assignee = options.assignee;
@@ -2212,7 +2222,7 @@ addHelpSchema(taskCmd.command("list"), {
 		let filterDescription = "";
 		let title = "Tasks";
 		const activeFilters: string[] = [];
-		if (options.status) activeFilters.push(`Status: ${options.status}`);
+		if (statusFilters.length > 0) activeFilters.push(`Status: ${statusFilters.join(", ")}`);
 		if (options.assignee) activeFilters.push(`Assignee: ${options.assignee}`);
 		if (options.parent) {
 			activeFilters.push(`Parent: ${normalizeTaskId(String(options.parent))}`);
@@ -2229,7 +2239,7 @@ addHelpSchema(taskCmd.command("list"), {
 			title = `Tasks (${activeFilters.join(" • ")})`;
 		}
 		const initialUnifiedFilter: {
-			status?: string;
+			status?: string | string[];
 			assignee?: string;
 			milestone?: string;
 			priority?: string;
@@ -2242,7 +2252,7 @@ addHelpSchema(taskCmd.command("list"), {
 			parentTaskId?: string;
 			limit?: number;
 		} = {
-			status: options.status,
+			status: statusFilters.length > 0 ? statusFilters : undefined,
 			assignee: options.assignee,
 			milestone: options.milestone,
 			priority: options.priority,
