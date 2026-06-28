@@ -13,9 +13,18 @@ import {
 import type { Milestone, Task, TaskSearchResult } from "../types/index.ts";
 import { copyToClipboard } from "../utils/clipboard.ts";
 import { areLabelSelectionsEqual, collectAvailableLabels, labelsToLower } from "../utils/label-filter.ts";
-import { NO_MILESTONE_FILTER_LABEL, NO_MILESTONE_FILTER_VALUE } from "../utils/milestone-filter.ts";
+import {
+	milestonePickerLabelsToValues,
+	milestoneValuesToPickerLabels,
+	NO_MILESTONE_FILTER_LABEL,
+} from "../utils/milestone-filter.ts";
 import { hasAnyPrefix } from "../utils/prefix-config.ts";
-import { applyTaskFilters, createTaskSearchIndex, type LabelMatchMode } from "../utils/task-search.ts";
+import {
+	applyTaskFilters,
+	createTaskSearchIndex,
+	type LabelMatchMode,
+	resolveConfiguredStatuses,
+} from "../utils/task-search.ts";
 import { attachSubtaskSummaries } from "../utils/task-subtasks.ts";
 import { formatChecklistItem } from "./checklist.ts";
 import { transformCodePaths } from "./code-path.ts";
@@ -26,7 +35,7 @@ import {
 	type FilterHeader,
 	type FilterState,
 } from "./components/filter-header.ts";
-import { openMultiSelectFilterPopup, openSingleSelectFilterPopup } from "./components/filter-popup.ts";
+import { openMultiSelectFilterPopup } from "./components/filter-popup.ts";
 import { createGenericList, type GenericList } from "./components/generic-list.ts";
 import { openHelpPopup } from "./components/help-popup.ts";
 import { formatFooterContent } from "./footer-content.ts";
@@ -168,9 +177,9 @@ export async function viewTaskEnhanced(
 		title?: string;
 		filterDescription?: string;
 		searchQuery?: string;
-		statusFilter?: string;
-		priorityFilter?: string;
-		milestoneFilter?: string;
+		statusFilter?: string[];
+		priorityFilter?: string[];
+		milestoneFilter?: string[];
 		labelFilter?: string[];
 		labelMatch?: LabelMatchMode;
 		limit?: number;
@@ -179,13 +188,14 @@ export async function viewTaskEnhanced(
 		viewSwitcher?: import("./view-switcher.ts").ViewSwitcher;
 		onTaskChange?: (task: Task) => void;
 		onTabPress?: () => Promise<void>;
+		subscribeUpdates?: (updater: (nextTasks: Task[]) => void) => void;
 		onFilterChange?: (filters: {
 			searchQuery: string;
-			statusFilter: string;
-			priorityFilter: string;
+			statusFilter: string[];
+			priorityFilter: string[];
 			labelFilter: string[];
 			labelMatch?: LabelMatchMode;
-			milestoneFilter: string;
+			milestoneFilter: string[];
 		}) => void;
 	} = {},
 ): Promise<void> {
@@ -244,18 +254,13 @@ export async function viewTaskEnhanced(
 	// State for filtering - normalize filters to match configured values
 	let searchQuery = options.searchQuery || "";
 
-	// Find the canonical status value from configured statuses (case-insensitive)
-	let statusFilter = "";
-	if (options.statusFilter) {
-		const lowerFilter = options.statusFilter.toLowerCase();
-		const matchedStatus = statuses.find((s) => s.toLowerCase() === lowerFilter);
-		statusFilter = matchedStatus || "";
-	}
+	// Normalize status filters to configured canonical values
+	let statusFilter = resolveConfiguredStatuses(options.statusFilter ?? [], statuses);
 
-	// Priority is already lowercase
-	let priorityFilter = options.priorityFilter || "";
+	// Priority and milestone filters
+	let priorityFilter = [...(options.priorityFilter ?? [])];
 	let labelFilter: string[] = [];
-	let milestoneFilter = options.milestoneFilter || "";
+	let milestoneFilter = [...(options.milestoneFilter ?? [])];
 	let labelMatch: LabelMatchMode = options.labelMatch ?? "any";
 	const taskLimit = options.limit;
 	let filteredTasks = [...allTasks];
@@ -267,10 +272,10 @@ export async function viewTaskEnhanced(
 
 	const filtersActive = Boolean(
 		searchQuery ||
-			statusFilter ||
-			priorityFilter ||
+			statusFilter.length > 0 ||
+			priorityFilter.length > 0 ||
 			labelFilter.length > 0 ||
-			milestoneFilter ||
+			milestoneFilter.length > 0 ||
 			taskLimit !== undefined,
 	);
 	let requireInitialFilterSelection = filtersActive;
@@ -284,6 +289,8 @@ export async function viewTaskEnhanced(
 	let currentSelectedTask = enrichTask(task) ?? task;
 	let selectionRequestId = 0;
 	let noResultsMessage: string | null = null;
+	let taskList: GenericList<Task> | null = null;
+	let listEmptyStateBox: BoxInterface | null = null;
 
 	const screen = createScreen({ title: options.title || "Backlog Tasks" });
 
@@ -349,15 +356,15 @@ export async function viewTaskEnhanced(
 			}
 
 			if (filterId === "status") {
-				const selected = await openSingleSelectFilterPopup({
+				const nextStatuses = await openMultiSelectFilterPopup({
 					screen,
 					title: "Status Filter",
-					selectedValue: statusFilter,
-					choices: [{ label: "All", value: "" }, ...statuses.map((status) => ({ label: status, value: status }))],
+					items: statuses,
+					selectedItems: statusFilter,
 				});
-				if (selected !== null) {
-					statusFilter = selected;
-					filterHeader.setFilters({ status: selected });
+				if (nextStatuses !== null) {
+					statusFilter = resolveConfiguredStatuses(nextStatuses, statuses);
+					filterHeader.setFilters({ status: statusFilter });
 					applyFilters();
 					notifyFilterChange();
 				}
@@ -366,37 +373,31 @@ export async function viewTaskEnhanced(
 
 			if (filterId === "priority") {
 				const priorities = ["high", "medium", "low"];
-				const selected = await openSingleSelectFilterPopup({
+				const nextPriorities = await openMultiSelectFilterPopup({
 					screen,
 					title: "Priority Filter",
-					selectedValue: priorityFilter,
-					choices: [
-						{ label: "All", value: "" },
-						...priorities.map((priority) => ({ label: priority, value: priority })),
-					],
+					items: priorities,
+					selectedItems: priorityFilter,
 				});
-				if (selected !== null) {
-					priorityFilter = selected;
-					filterHeader.setFilters({ priority: selected });
+				if (nextPriorities !== null) {
+					priorityFilter = nextPriorities;
+					filterHeader.setFilters({ priority: priorityFilter });
 					applyFilters();
 					notifyFilterChange();
 				}
 				return;
 			}
 
-			const selected = await openSingleSelectFilterPopup({
+			const milestonePickerItems = [NO_MILESTONE_FILTER_LABEL, ...availableMilestoneTitles];
+			const nextMilestones = await openMultiSelectFilterPopup({
 				screen,
 				title: "Milestone Filter",
-				selectedValue: milestoneFilter,
-				choices: [
-					{ label: "All", value: "" },
-					{ label: NO_MILESTONE_FILTER_LABEL, value: NO_MILESTONE_FILTER_VALUE },
-					...availableMilestoneTitles.map((milestone) => ({ label: milestone, value: milestone })),
-				],
+				items: milestonePickerItems,
+				selectedItems: milestoneValuesToPickerLabels(milestoneFilter),
 			});
-			if (selected !== null) {
-				milestoneFilter = selected;
-				filterHeader.setFilters({ milestone: selected });
+			if (nextMilestones !== null) {
+				milestoneFilter = milestonePickerLabelsToValues(nextMilestones);
+				filterHeader.setFilters({ milestone: milestoneFilter });
 				applyFilters();
 				notifyFilterChange();
 			}
@@ -422,13 +423,13 @@ export async function viewTaskEnhanced(
 		onFilterChange: (filters: FilterState) => {
 			const labelsChanged = !areLabelSelectionsEqual(labelFilter, filters.labels);
 			searchQuery = filters.search;
-			statusFilter = filters.status;
-			priorityFilter = filters.priority;
+			statusFilter = [...filters.status];
+			priorityFilter = [...filters.priority];
 			labelFilter = filters.labels;
 			if (labelsChanged) {
 				labelMatch = "any";
 			}
-			milestoneFilter = filters.milestone;
+			milestoneFilter = [...filters.milestone];
 			applyFilters();
 			notifyFilterChange();
 		},
@@ -579,6 +580,28 @@ export async function viewTaskEnhanced(
 		screen.render();
 	}
 
+	function restoreFocusAfterListRebuild(
+		snapshot: { pane: typeof currentFocus; filterControl: FilterControlId | null },
+		listIndex?: number,
+	): void {
+		if (filterPopupOpen || modalOpen) {
+			return;
+		}
+		switch (snapshot.pane) {
+			case "list":
+				focusTaskList(listIndex);
+				break;
+			case "detail":
+				focusDetailPane();
+				break;
+			case "filters":
+				if (snapshot.filterControl) {
+					focusFilterControl(snapshot.filterControl);
+				}
+				break;
+		}
+	}
+
 	// Helper to notify filter changes
 	function notifyFilterChange() {
 		if (options.onFilterChange) {
@@ -595,8 +618,17 @@ export async function viewTaskEnhanced(
 
 	// Function to apply filters and refresh the task list
 	function applyFilters() {
+		const focusSnapshot = {
+			pane: currentFocus,
+			filterControl: filterHeader.getCurrentFocus(),
+		};
+		let restoredListIndex: number | undefined;
 		const hasActiveFilters = Boolean(
-			searchQuery.trim() || statusFilter || priorityFilter || labelFilter.length > 0 || milestoneFilter,
+			searchQuery.trim() ||
+				statusFilter.length > 0 ||
+				priorityFilter.length > 0 ||
+				labelFilter.length > 0 ||
+				milestoneFilter.length > 0,
 		);
 		let nextFilteredTasks: Task[];
 		if (!hasActiveFilters) {
@@ -606,11 +638,11 @@ export async function viewTaskEnhanced(
 				allTasks,
 				{
 					query: searchQuery,
-					status: statusFilter || undefined,
-					priority: priorityFilter as "high" | "medium" | "low" | undefined,
+					status: statusFilter.length > 0 ? statusFilter : undefined,
+					priority: priorityFilter.length > 0 ? priorityFilter : undefined,
 					labels: labelFilter,
 					labelMatch,
-					milestone: milestoneFilter || undefined,
+					milestone: milestoneFilter.length > 0 ? milestoneFilter : undefined,
 					resolveMilestoneLabel,
 				},
 				taskSearchIndex,
@@ -619,21 +651,17 @@ export async function viewTaskEnhanced(
 			const searchResults = searchService.search({
 				query: searchQuery,
 				filters: {
-					status: statusFilter || undefined,
-					priority: priorityFilter as "high" | "medium" | "low" | undefined,
+					status: statusFilter.length > 0 ? statusFilter : undefined,
+					priority: priorityFilter.length > 0 ? (priorityFilter as Array<"high" | "medium" | "low">) : undefined,
 					labels: labelFilter.length > 0 ? labelFilter : undefined,
 				},
 				types: ["task"],
 			});
 			nextFilteredTasks = searchResults.filter((r): r is TaskSearchResult => r.type === "task").map((r) => r.task);
-			if (milestoneFilter) {
-				nextFilteredTasks = nextFilteredTasks.filter((task) => {
-					if (milestoneFilter === NO_MILESTONE_FILTER_VALUE) {
-						return !task.milestone?.trim();
-					}
-					if (!task.milestone) return false;
-					const taskMilestoneTitle = resolveMilestoneLabel(task.milestone);
-					return taskMilestoneTitle.toLowerCase() === milestoneFilter.toLowerCase();
+			if (milestoneFilter.length > 0) {
+				nextFilteredTasks = applyTaskFilters(nextFilteredTasks, {
+					milestone: milestoneFilter,
+					resolveMilestoneLabel,
 				});
 			}
 			if (labelMatch === "all" && labelFilter.length > 0) {
@@ -663,19 +691,17 @@ export async function viewTaskEnhanced(
 			if (trimmedQuery) {
 				activeFilters.push(`Search: {cyan-fg}${trimmedQuery}{/}`);
 			}
-			if (statusFilter) {
-				activeFilters.push(`Status: {cyan-fg}${statusFilter}{/}`);
+			if (statusFilter.length > 0) {
+				activeFilters.push(`Status: {cyan-fg}${statusFilter.join(", ")}{/}`);
 			}
-			if (priorityFilter) {
-				activeFilters.push(`Priority: {cyan-fg}${priorityFilter}{/}`);
+			if (priorityFilter.length > 0) {
+				activeFilters.push(`Priority: {cyan-fg}${priorityFilter.join(", ")}{/}`);
 			}
 			if (labelFilter.length > 0) {
 				activeFilters.push(`Labels: {yellow-fg}${labelFilter.join(", ")}{/}`);
 			}
-			if (milestoneFilter) {
-				const milestoneFilterLabel =
-					milestoneFilter === NO_MILESTONE_FILTER_VALUE ? NO_MILESTONE_FILTER_LABEL : milestoneFilter;
-				activeFilters.push(`Milestone: {magenta-fg}${milestoneFilterLabel}{/}`);
+			if (milestoneFilter.length > 0) {
+				activeFilters.push(`Milestone: {magenta-fg}${milestoneValuesToPickerLabels(milestoneFilter).join(", ")}{/}`);
 			}
 			let listPaneMessage: string;
 			if (activeFilters.length > 0) {
@@ -688,6 +714,7 @@ export async function viewTaskEnhanced(
 			}
 			showListEmptyState(listPaneMessage);
 			refreshDetailPane();
+			restoreFocusAfterListRebuild(focusSnapshot);
 			screen.render();
 			return;
 		}
@@ -717,18 +744,17 @@ export async function viewTaskEnhanced(
 			if (forceFirst || currentIndex !== desiredIndex) {
 				listController.setSelectedIndex(desiredIndex);
 			}
+			restoredListIndex = desiredIndex;
 			requireInitialFilterSelection = false;
 		}
 
 		// Ensure detail pane is refreshed when transitioning from no-results to results
 		refreshDetailPane();
+		restoreFocusAfterListRebuild(focusSnapshot, restoredListIndex);
 		screen.render();
 	}
 
 	// Task list component
-	let taskList: GenericList<Task> | null = null;
-	let listEmptyStateBox: BoxInterface | null = null;
-
 	function showListEmptyState(message: string) {
 		if (listEmptyStateBox) {
 			listEmptyStateBox.destroy();
@@ -1325,6 +1351,25 @@ export async function viewTaskEnhanced(
 		taskList = createTaskList();
 	}
 	refreshDetailPane();
+
+	const updateTaskList = (nextTasks: Task[]) => {
+		allTasks = nextTasks.filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+		taskSearchIndex = createTaskSearchIndex(allTasks);
+		availableLabels = collectAvailableLabels(allTasks, [...labels, ...labelFilter]);
+
+		const previousSelectedId = currentSelectedTask.id;
+		applyFilters();
+
+		const updatedSelected = filteredTasks.find((taskItem) => taskItem.id === previousSelectedId);
+		if (updatedSelected) {
+			currentSelectedTask = enrichTask(updatedSelected) ?? updatedSelected;
+			options.onTaskChange?.(currentSelectedTask);
+			refreshDetailPane();
+		}
+		screen.render();
+	};
+
+	options.subscribeUpdates?.(updateTaskList);
 
 	if (options.startWithSearchFocus) {
 		filterHeader.focusSearch();

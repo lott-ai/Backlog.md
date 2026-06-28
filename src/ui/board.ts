@@ -10,12 +10,16 @@ import { Core } from "../core/backlog.ts";
 import type { Milestone, Task } from "../types/index.ts";
 import { copyToClipboard } from "../utils/clipboard.ts";
 import { areLabelSelectionsEqual, collectAvailableLabels } from "../utils/label-filter.ts";
-import { NO_MILESTONE_FILTER_LABEL, NO_MILESTONE_FILTER_VALUE } from "../utils/milestone-filter.ts";
+import {
+	milestonePickerLabelsToValues,
+	milestoneValuesToPickerLabels,
+	NO_MILESTONE_FILTER_LABEL,
+} from "../utils/milestone-filter.ts";
 import { applySharedTaskFilters, createTaskSearchIndex, type LabelMatchMode } from "../utils/task-search.ts";
 import { compareTaskIds } from "../utils/task-sorting.ts";
 import { openConfirmPopup } from "./components/confirm-popup.ts";
 import { createFilterHeader, type FilterHeader, type FilterState } from "./components/filter-header.ts";
-import { openMultiSelectFilterPopup, openSingleSelectFilterPopup } from "./components/filter-popup.ts";
+import { openMultiSelectFilterPopup } from "./components/filter-popup.ts";
 import { openHelpPopup } from "./components/help-popup.ts";
 import { formatFooterContent } from "./footer-content.ts";
 import { getStatusIcon } from "./status-icon.ts";
@@ -189,20 +193,20 @@ export async function renderBoardTui(
 		subscribeUpdates?: (update: (nextTasks: Task[], nextStatuses: string[]) => void) => void;
 		filters?: {
 			searchQuery: string;
-			priorityFilter: string;
+			priorityFilter: string[];
 			labelFilter: string[];
 			labelMatch?: LabelMatchMode;
-			milestoneFilter: string;
+			milestoneFilter: string[];
 			limit?: number;
 		};
 		availableLabels?: string[];
 		availableMilestones?: string[];
 		onFilterChange?: (filters: {
 			searchQuery: string;
-			priorityFilter: string;
+			priorityFilter: string[];
 			labelFilter: string[];
 			labelMatch?: LabelMatchMode;
-			milestoneFilter: string;
+			milestoneFilter: string[];
 			limit?: number;
 		}) => void;
 		milestoneMode?: boolean;
@@ -253,10 +257,10 @@ export async function renderBoardTui(
 		let programmaticColumnSelection = false;
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
-			priorityFilter: options?.filters?.priorityFilter ?? "",
+			priorityFilter: [...(options?.filters?.priorityFilter ?? [])],
 			labelFilter: [...(options?.filters?.labelFilter ?? [])],
 			labelMatch: options?.filters?.labelMatch ?? "any",
-			milestoneFilter: options?.filters?.milestoneFilter ?? "",
+			milestoneFilter: [...(options?.filters?.milestoneFilter ?? [])],
 			limit: options?.filters?.limit,
 		};
 		const runWithModalGuard = async <T>(operation: () => Promise<T>): Promise<T> => {
@@ -302,9 +306,9 @@ export async function renderBoardTui(
 		const hasActiveSharedFilters = () =>
 			Boolean(
 				sharedFilters.searchQuery.trim() ||
-					sharedFilters.priorityFilter ||
+					sharedFilters.priorityFilter.length > 0 ||
 					sharedFilters.labelFilter.length > 0 ||
-					sharedFilters.milestoneFilter ||
+					sharedFilters.milestoneFilter.length > 0 ||
 					sharedFilters.limit !== undefined,
 			);
 		const emitFilterChange = () => {
@@ -327,10 +331,10 @@ export async function renderBoardTui(
 					currentTasks,
 					{
 						query: sharedFilters.searchQuery,
-						priority: sharedFilters.priorityFilter as "high" | "medium" | "low" | undefined,
+						priority: sharedFilters.priorityFilter.length > 0 ? sharedFilters.priorityFilter : undefined,
 						labels: sharedFilters.labelFilter,
 						labelMatch: sharedFilters.labelMatch,
-						milestone: sharedFilters.milestoneFilter || undefined,
+						milestone: sharedFilters.milestoneFilter.length > 0 ? sharedFilters.milestoneFilter : undefined,
 						resolveMilestoneLabel,
 					},
 					searchIndex,
@@ -673,37 +677,31 @@ export async function renderBoardTui(
 
 				if (filterId === "priority") {
 					const priorities = ["high", "medium", "low"];
-					const selected = await openSingleSelectFilterPopup({
+					const nextPriorities = await openMultiSelectFilterPopup({
 						screen,
 						title: "Priority Filter",
-						selectedValue: sharedFilters.priorityFilter,
-						choices: [
-							{ label: "All", value: "" },
-							...priorities.map((priority) => ({ label: priority, value: priority })),
-						],
+						items: priorities,
+						selectedItems: sharedFilters.priorityFilter,
 					});
-					if (selected !== null) {
-						sharedFilters.priorityFilter = selected;
-						filterHeader.setFilters({ priority: selected });
+					if (nextPriorities !== null) {
+						sharedFilters.priorityFilter = nextPriorities;
+						filterHeader.setFilters({ priority: nextPriorities });
 						emitFilterChange();
 						renderView();
 					}
 					return;
 				}
 
-				const selected = await openSingleSelectFilterPopup({
+				const milestonePickerItems = [NO_MILESTONE_FILTER_LABEL, ...availableMilestones];
+				const nextMilestones = await openMultiSelectFilterPopup({
 					screen,
 					title: "Milestone Filter",
-					selectedValue: sharedFilters.milestoneFilter,
-					choices: [
-						{ label: "All", value: "" },
-						{ label: NO_MILESTONE_FILTER_LABEL, value: NO_MILESTONE_FILTER_VALUE },
-						...availableMilestones.map((value) => ({ label: value, value })),
-					],
+					items: milestonePickerItems,
+					selectedItems: milestoneValuesToPickerLabels(sharedFilters.milestoneFilter),
 				});
-				if (selected !== null) {
-					sharedFilters.milestoneFilter = selected;
-					filterHeader.setFilters({ milestone: selected });
+				if (nextMilestones !== null) {
+					sharedFilters.milestoneFilter = milestonePickerLabelsToValues(nextMilestones);
+					filterHeader.setFilters({ milestone: sharedFilters.milestoneFilter });
 					emitFilterChange();
 					renderView();
 				}
@@ -729,12 +727,12 @@ export async function renderBoardTui(
 			onFilterChange: (filters: FilterState) => {
 				const labelsChanged = !areLabelSelectionsEqual(sharedFilters.labelFilter, filters.labels);
 				sharedFilters.searchQuery = filters.search;
-				sharedFilters.priorityFilter = filters.priority;
+				sharedFilters.priorityFilter = [...filters.priority];
 				sharedFilters.labelFilter = filters.labels;
 				if (labelsChanged) {
 					sharedFilters.labelMatch = "any";
 				}
-				sharedFilters.milestoneFilter = filters.milestone;
+				sharedFilters.milestoneFilter = [...filters.milestone];
 				emitFilterChange();
 				renderView();
 			},

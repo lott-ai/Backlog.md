@@ -5,17 +5,17 @@
 
 import type { BoxInterface, ScreenInterface, TextboxInterface } from "neo-neo-bblessed";
 import { box, textbox } from "neo-neo-bblessed";
-import { formatLabelSummary } from "../../utils/label-filter.ts";
-import { NO_MILESTONE_FILTER_LABEL, NO_MILESTONE_FILTER_VALUE } from "../../utils/milestone-filter.ts";
+import { formatLabelSummary, formatMultiSelectSummary } from "../../utils/label-filter.ts";
+import { formatMilestoneFilterSummary } from "../../utils/milestone-filter.ts";
 
 export type FilterControlId = "search" | "status" | "priority" | "labels" | "milestone";
 
 export interface FilterState {
 	search: string;
-	status: string;
-	priority: string;
+	status: string[];
+	priority: string[];
 	labels: string[];
-	milestone: string;
+	milestone: string[];
 }
 
 export interface FilterHeaderOptions {
@@ -147,10 +147,10 @@ export class FilterHeader {
 		this.visibleFilterIds = normalizeVisibleFilters(options.visibleFilters);
 		this.state = {
 			search: options.initialFilters?.search ?? "",
-			status: options.initialFilters?.status ?? "",
-			priority: options.initialFilters?.priority ?? "",
+			status: options.initialFilters?.status ?? [],
+			priority: options.initialFilters?.priority ?? [],
 			labels: options.initialFilters?.labels ?? [],
-			milestone: options.initialFilters?.milestone ?? "",
+			milestone: options.initialFilters?.milestone ?? [],
 		};
 
 		const parentWidth = typeof this.parent.width === "number" ? this.parent.width : 80;
@@ -194,11 +194,11 @@ export class FilterHeader {
 			this.searchInput?.setValue(filters.search);
 		}
 		if (filters.status !== undefined) {
-			this.state.status = filters.status;
+			this.state.status = [...filters.status];
 			this.updateStatusButton();
 		}
 		if (filters.priority !== undefined) {
-			this.state.priority = filters.priority;
+			this.state.priority = [...filters.priority];
 			this.updatePriorityButton();
 		}
 		if (filters.labels !== undefined) {
@@ -206,7 +206,7 @@ export class FilterHeader {
 			this.updateLabelsButton();
 		}
 		if (filters.milestone !== undefined) {
-			this.state.milestone = filters.milestone;
+			this.state.milestone = [...filters.milestone];
 			this.updateMilestoneButton();
 		}
 	}
@@ -598,14 +598,11 @@ export class FilterHeader {
 	private getPopupButtonContent(field: Exclude<FilterControlId, "search">): string {
 		switch (field) {
 			case "status":
-				return this.state.status ? `${this.state.status} ▼` : "All ▼";
+				return `${formatMultiSelectSummary(this.state.status, "All")} ▼`;
 			case "priority":
-				return this.state.priority ? `${this.state.priority} ▼` : "All ▼";
+				return `${formatMultiSelectSummary(this.state.priority, "All")} ▼`;
 			case "milestone":
-				if (!this.state.milestone) {
-					return "All ▼";
-				}
-				return `${this.state.milestone === NO_MILESTONE_FILTER_VALUE ? NO_MILESTONE_FILTER_LABEL : this.state.milestone} ▼`;
+				return `${formatMilestoneFilterSummary(this.state.milestone, "All")} ▼`;
 			case "labels": {
 				const summary = formatLabelSummary(this.state.labels).replace(/^Labels:\s*/, "");
 				return `${summary} ▼`;

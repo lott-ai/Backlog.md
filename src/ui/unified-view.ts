@@ -8,7 +8,12 @@ import { watchConfig } from "../utils/config-watcher.ts";
 import { detectDuplicateTaskIds } from "../utils/duplicate-detection.ts";
 import { collectAvailableLabels } from "../utils/label-filter.ts";
 import { hasAnyPrefix } from "../utils/prefix-config.ts";
-import { applySharedTaskFilters, createTaskSearchIndex, type LabelMatchMode } from "../utils/task-search.ts";
+import {
+	applySharedTaskFilters,
+	createTaskSearchIndex,
+	type LabelMatchMode,
+	resolveConfiguredStatuses,
+} from "../utils/task-search.ts";
 import { watchTasks } from "../utils/task-watcher.ts";
 import { renderBoardTui } from "./board.ts";
 import { createLoadingScreen } from "./loading.ts";
@@ -24,12 +29,12 @@ export interface UnifiedViewOptions {
 	loadingScreenFactory?: (initialMessage: string) => Promise<LoadingScreen | null>;
 	title?: string;
 	filter?: {
-		status?: string;
+		status?: string | string[];
 		assignee?: string;
-		priority?: string;
+		priority?: string | string[];
 		labels?: string[];
 		labelMatch?: LabelMatchMode;
-		milestone?: string;
+		milestone?: string | string[];
 		sort?: string;
 		title?: string;
 		filterDescription?: string;
@@ -57,30 +62,30 @@ export interface UnifiedViewLoadResult {
 
 export interface UnifiedViewFilters {
 	searchQuery: string;
-	statusFilter: string;
-	priorityFilter: string;
+	statusFilter: string[];
+	priorityFilter: string[];
 	labelFilter: string[];
 	labelMatch?: LabelMatchMode;
-	milestoneFilter: string;
+	milestoneFilter: string[];
 	limit?: number;
 }
 
 export interface KanbanSharedFilters {
 	searchQuery: string;
-	priorityFilter: string;
+	priorityFilter: string[];
 	labelFilter: string[];
 	labelMatch?: LabelMatchMode;
-	milestoneFilter: string;
+	milestoneFilter: string[];
 	limit?: number;
 }
 
 export function createKanbanSharedFilters(filters: UnifiedViewFilters): KanbanSharedFilters {
 	return {
 		searchQuery: filters.searchQuery,
-		priorityFilter: filters.priorityFilter,
+		priorityFilter: [...filters.priorityFilter],
 		labelFilter: [...filters.labelFilter],
 		labelMatch: filters.labelMatch,
-		milestoneFilter: filters.milestoneFilter,
+		milestoneFilter: [...filters.milestoneFilter],
 		limit: filters.limit,
 	};
 }
@@ -92,9 +97,9 @@ export function filterTasksForKanban(
 ): Task[] {
 	if (
 		!filters.searchQuery.trim() &&
-		!filters.priorityFilter &&
+		filters.priorityFilter.length === 0 &&
 		filters.labelFilter.length === 0 &&
-		!filters.milestoneFilter
+		filters.milestoneFilter.length === 0
 	) {
 		return filters.limit !== undefined ? tasks.slice(0, filters.limit) : [...tasks];
 	}
@@ -104,10 +109,10 @@ export function filterTasksForKanban(
 		tasks,
 		{
 			query: filters.searchQuery,
-			priority: filters.priorityFilter as "high" | "medium" | "low" | undefined,
+			priority: filters.priorityFilter.length > 0 ? filters.priorityFilter : undefined,
 			labels: filters.labelFilter,
 			labelMatch: filters.labelMatch ?? "any",
-			milestone: filters.milestoneFilter || undefined,
+			milestone: filters.milestoneFilter.length > 0 ? filters.milestoneFilter : undefined,
 			resolveMilestoneLabel,
 		},
 		searchIndex,
@@ -115,14 +120,23 @@ export function filterTasksForKanban(
 	return filters.limit !== undefined ? filteredTasks.slice(0, filters.limit) : filteredTasks;
 }
 
-export function createUnifiedViewFilters(filter: UnifiedViewOptions["filter"] | undefined): UnifiedViewFilters {
+export function createUnifiedViewFilters(
+	filter: UnifiedViewOptions["filter"] | undefined,
+	configuredStatuses: string[] = [],
+): UnifiedViewFilters {
+	const rawStatus = filter?.status;
+	const statusValues = rawStatus ? (Array.isArray(rawStatus) ? rawStatus : [rawStatus]) : [];
+	const rawPriority = filter?.priority;
+	const priorityValues = rawPriority ? (Array.isArray(rawPriority) ? rawPriority : [rawPriority]) : [];
+	const rawMilestone = filter?.milestone;
+	const milestoneValues = rawMilestone ? (Array.isArray(rawMilestone) ? rawMilestone : [rawMilestone]) : [];
 	return {
 		searchQuery: filter?.searchQuery || "",
-		statusFilter: filter?.status || "",
-		priorityFilter: filter?.priority || "",
+		statusFilter: statusValues.length > 0 ? resolveConfiguredStatuses(statusValues, configuredStatuses) : [],
+		priorityFilter: priorityValues,
 		labelFilter: [...(filter?.labels || [])],
 		labelMatch: filter?.labelMatch ?? "any",
-		milestoneFilter: filter?.milestone || "",
+		milestoneFilter: milestoneValues,
 		limit: filter?.limit,
 	};
 }
@@ -131,11 +145,11 @@ export function mergeUnifiedViewFilters(current: UnifiedViewFilters, update: Uni
 	return {
 		...current,
 		searchQuery: update.searchQuery,
-		statusFilter: update.statusFilter,
-		priorityFilter: update.priorityFilter,
+		statusFilter: [...update.statusFilter],
+		priorityFilter: [...update.priorityFilter],
 		labelFilter: [...update.labelFilter],
 		labelMatch: update.labelMatch ?? current.labelMatch ?? "any",
-		milestoneFilter: update.milestoneFilter,
+		milestoneFilter: [...update.milestoneFilter],
 		limit: update.limit ?? current.limit,
 	};
 }
@@ -214,7 +228,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		let configuredLabels = initialConfig?.labels ?? [];
 		let milestoneEntities = await options.core.filesystem.listMilestones();
 		let milestoneFilterModel = buildTaskViewerMilestoneFilterModel(milestoneEntities);
-		let currentFilters = createUnifiedViewFilters(options.filter);
+		let currentFilters = createUnifiedViewFilters(options.filter, loadedStatuses ?? []);
 		const initialState: ViewState = {
 			type: options.initialView,
 			selectedTask: options.selectedTask,
@@ -238,6 +252,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		let tasks = baseTasks;
 		let kanbanStatuses = loadedStatuses ?? [];
 		let boardUpdater: ((nextTasks: Task[], nextStatuses: string[]) => void) | null = null;
+		let taskListUpdater: ((nextTasks: Task[]) => void) | null = null;
 
 		const getRenderableTasks = () => tasks.filter((task) => task.id && task.id.trim() !== "" && hasAnyPrefix(task.id));
 		const getBoardAvailableLabels = () => collectAvailableLabels(getRenderableTasks(), configuredLabels);
@@ -246,6 +261,10 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		const emitBoardUpdate = () => {
 			if (!boardUpdater) return;
 			boardUpdater(getRenderableTasks(), kanbanStatuses);
+		};
+		const emitTaskListUpdate = () => {
+			if (!taskListUpdater) return;
+			taskListUpdater(getRenderableTasks());
 		};
 		let isInitialLoad = true; // Track if this is the first view load
 
@@ -263,6 +282,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
 				});
 				emitBoardUpdate();
+				emitTaskListUpdate();
 			},
 			onTaskChanged(task) {
 				const idx = tasks.findIndex((t) => t.id === task.id);
@@ -277,6 +297,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
 				});
 				emitBoardUpdate();
+				emitTaskListUpdate();
 			},
 			onTaskRemoved(taskId) {
 				tasks = tasks.filter((t) => t.id !== taskId);
@@ -289,6 +310,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
 				});
 				emitBoardUpdate();
+				emitTaskListUpdate();
 			},
 		});
 		process.on("exit", () => watcher.stop());
@@ -362,8 +384,13 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					onFilterChange: (filters) => {
 						currentFilters = mergeUnifiedViewFilters(currentFilters, filters);
 					},
+					subscribeUpdates: (updater) => {
+						taskListUpdater = updater;
+						emitTaskListUpdate();
+					},
 					onTabPress,
 				}).then(() => {
+					taskListUpdater = null;
 					// If user wants to exit, do it immediately
 					if (result === "exit") {
 						process.exit(0);
@@ -404,10 +431,10 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 						currentFilters = {
 							...currentFilters,
 							searchQuery: filters.searchQuery,
-							priorityFilter: filters.priorityFilter,
+							priorityFilter: [...filters.priorityFilter],
 							labelFilter: [...filters.labelFilter],
 							labelMatch: filters.labelMatch ?? currentFilters.labelMatch ?? "any",
-							milestoneFilter: filters.milestoneFilter,
+							milestoneFilter: [...filters.milestoneFilter],
 							limit: filters.limit ?? currentFilters.limit,
 						};
 					},

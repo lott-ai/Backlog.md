@@ -13,9 +13,9 @@ export interface ViewState {
 	selectedTask?: Task;
 	tasks?: Task[];
 	filter?: {
-		status?: string;
+		status?: string | string[];
 		assignee?: string;
-		priority?: string;
+		priority?: string | string[];
 		sort?: string;
 		title?: string;
 		filterDescription?: string;
