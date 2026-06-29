@@ -87,7 +87,7 @@ import { normalizeTaskId, taskIdsEqual } from "./utils/task-path.ts";
 import { applySharedTaskFilters } from "./utils/task-search.ts";
 import { sortTasks } from "./utils/task-sorting.ts";
 import { getTerminalStatus, isTerminalStatus } from "./utils/terminal-status.ts";
-import { getVersion } from "./utils/version.ts";
+import { formatVersionDisplay, getVersion } from "./utils/version.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -469,6 +469,10 @@ try {
 	}
 	const wantsHelp = rawArgs.includes("-h") || rawArgs.includes("--help");
 	const wantsVersion = rawArgs.includes("-v") || rawArgs.includes("--version");
+	if (wantsVersion) {
+		console.log(await formatVersionDisplay());
+		process.exit(0);
+	}
 	const isBareRoot = rawArgs.length === 0 || (rawArgs.length === 1 && rawArgs[0] === "--plain");
 	if (isBareRoot && !wantsHelp && !wantsVersion) {
 		let initialized = false;

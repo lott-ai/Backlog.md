@@ -98,11 +98,13 @@ jobs:
         shell: bash
         run: |
           VER="$(jq -r .version package.json)"
+          COMMIT="$(git rev-parse --short HEAD)"
           OUT="backlog-test${{ contains(matrix.target,'windows') && '.exe' || '' }}"
           bun build src/cli.ts \
             --compile --minify \
             --target=${{ matrix.target }} \
             --define __EMBEDDED_VERSION__="\"${VER}\"" \
+            --define __EMBEDDED_COMMIT__="\"${COMMIT}\"" \
             --outfile="$OUT"
       - name: Smoke-test binary
         shell: bash

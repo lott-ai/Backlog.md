@@ -51,9 +51,11 @@ describe("CLI packaging", () => {
 		// Read version from package.json
 		const packageJson = await Bun.file("package.json").json();
 		const version = packageJson.version;
+		const commitResult = await $`git rev-parse --short HEAD`.quiet().nothrow();
+		const commit = commitResult.exitCode === 0 ? commitResult.stdout.toString().trim() : "";
 
 		try {
-			await $`bun build src/cli.ts --compile --minify --define __EMBEDDED_VERSION__="\"${version}\"" --outfile ${OUTFILE}`.quiet();
+			await $`bun build src/cli.ts --compile --minify --define __EMBEDDED_VERSION__="\"${version}\"" --define __EMBEDDED_COMMIT__="\"${commit}\"" --outfile ${OUTFILE}`.quiet();
 		} catch (error: unknown) {
 			// Skip test if build fails due to cross-filesystem issues (e.g., virtiofs)
 			// This is environment-specific and doesn't indicate a code problem
@@ -73,7 +75,9 @@ describe("CLI packaging", () => {
 		// Also test version command
 		const versionResult = await $`${OUTFILE} --version`.quiet();
 		const versionOutput = versionResult.stdout.toString().trim();
-		expect(versionOutput).toBe(version);
+		const ansiEsc = String.fromCharCode(27);
+		const plainVersionOutput = versionOutput.replace(new RegExp(`${ansiEsc}\\[[0-9;]*m`, "g"), "");
+		expect(plainVersionOutput).toBe(commit ? `${version} (${commit})` : version);
 
 		const timeout = getPlatformTimeout(8000);
 		let stderr = "";
