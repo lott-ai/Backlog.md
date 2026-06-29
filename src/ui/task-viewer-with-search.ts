@@ -188,6 +188,7 @@ export async function viewTaskEnhanced(
 		viewSwitcher?: import("./view-switcher.ts").ViewSwitcher;
 		onTaskChange?: (task: Task) => void;
 		onTabPress?: () => Promise<void>;
+		onTaskRemovedFromSession?: (taskId: string) => void;
 		subscribeUpdates?: (updater: (nextTasks: Task[]) => void) => void;
 		onFilterChange?: (filters: {
 			searchQuery: string;
@@ -1195,6 +1196,7 @@ export async function viewTaskEnhanced(
 						};
 
 			if (result.success) {
+				options.onTaskRemovedFromSession?.(task.id);
 				removeTaskFromCurrentView(task.id);
 				const label = action === "complete" ? "Completed" : "Archived";
 				showTransientHelp(` {green-fg}${label} ${task.id}{/}`);

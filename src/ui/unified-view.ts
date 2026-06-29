@@ -266,6 +266,19 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			if (!taskListUpdater) return;
 			taskListUpdater(getRenderableTasks());
 		};
+		const removeTaskFromSession = (taskId: string) => {
+			tasks = tasks.filter((t) => t.id !== taskId);
+			if (selectedTask?.id === taskId) {
+				selectedTask = getRenderableTasks()[0];
+			}
+			const state = viewSwitcher?.getState();
+			viewSwitcher?.updateState({
+				tasks,
+				kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
+			});
+			emitBoardUpdate();
+			emitTaskListUpdate();
+		};
 		let isInitialLoad = true; // Track if this is the first view load
 
 		// Create view switcher (without problematic onViewChange callback)
@@ -388,6 +401,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 						taskListUpdater = updater;
 						emitTaskListUpdate();
 					},
+					onTaskRemovedFromSession: removeTaskFromSession,
 					onTabPress,
 				}).then(() => {
 					taskListUpdater = null;
@@ -442,6 +456,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 						boardUpdater = updater;
 						emitBoardUpdate();
 					},
+					onTaskRemovedFromSession: removeTaskFromSession,
 					milestoneMode: options.milestoneMode,
 					milestoneEntities,
 					startupWarning,

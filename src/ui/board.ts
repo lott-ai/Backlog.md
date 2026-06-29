@@ -190,6 +190,7 @@ export async function renderBoardTui(
 		viewSwitcher?: import("./view-switcher.ts").ViewSwitcher;
 		onTaskSelect?: (task: Task) => void;
 		onTabPress?: () => Promise<void>;
+		onTaskRemovedFromSession?: (taskId: string) => void;
 		subscribeUpdates?: (update: (nextTasks: Task[], nextStatuses: string[]) => void) => void;
 		filters?: {
 			searchQuery: string;
@@ -868,6 +869,15 @@ export async function renderBoardTui(
 
 		options?.subscribeUpdates?.(updateBoard);
 
+		const removeTaskFromBoard = (taskId: string) => {
+			if (options?.onTaskRemovedFromSession) {
+				options.onTaskRemovedFromSession(taskId);
+				return;
+			}
+			currentTasks = currentTasks.filter((task) => task.id !== taskId);
+			renderView();
+		};
+
 		screen.on("resize", () => {
 			filterHeader?.rebuild();
 			syncBoardAreaLayout();
@@ -1166,11 +1176,10 @@ export async function renderBoardTui(
 						const result = await completeTaskFromTui(core, task);
 
 						if (result.success) {
-							currentTasks = currentTasks.filter((t) => t.id !== task.id);
+							removeTaskFromBoard(task.id);
 							showTransientFooter(` {green-fg}Completed ${task.id}{/}`);
 							close();
 							popupOpen = false;
-							renderView();
 						} else if (result.reason === "not-terminal") {
 							showTransientFooter(` {red-fg}${formatTaskCompletionBlockedMessage(task.id, result.terminalStatus)}{/}`);
 						} else {
@@ -1205,11 +1214,10 @@ export async function renderBoardTui(
 						const success = await core.archiveTask(task.id, config?.autoCommit ?? false);
 
 						if (success) {
-							currentTasks = currentTasks.filter((t) => t.id !== task.id);
+							removeTaskFromBoard(task.id);
 							showTransientFooter(` {green-fg}Archived ${task.id}{/}`);
 							close();
 							popupOpen = false;
-							renderView();
 						} else {
 							showTransientFooter(` {red-fg}Failed to archive ${task.id}{/}`);
 						}
@@ -1411,9 +1419,8 @@ export async function renderBoardTui(
 					const result = await completeTaskFromTui(core, task);
 
 					if (result.success) {
-						currentTasks = currentTasks.filter((t) => t.id !== task.id);
+						removeTaskFromBoard(task.id);
 						showTransientFooter(` {green-fg}Completed ${task.id}{/}`);
-						renderView();
 					} else if (result.reason === "not-terminal") {
 						showTransientFooter(` {red-fg}${formatTaskCompletionBlockedMessage(task.id, result.terminalStatus)}{/}`);
 					} else {
@@ -1455,9 +1462,8 @@ export async function renderBoardTui(
 					const success = await core.archiveTask(task.id, config?.autoCommit ?? false);
 
 					if (success) {
-						currentTasks = currentTasks.filter((t) => t.id !== task.id);
+						removeTaskFromBoard(task.id);
 						showTransientFooter(` {green-fg}Archived ${task.id}{/}`);
-						renderView();
 					} else {
 						showTransientFooter(` {red-fg}Failed to archive ${task.id}{/}`);
 					}
