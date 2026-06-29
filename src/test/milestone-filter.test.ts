@@ -3,6 +3,7 @@ import {
 	createMilestoneFilterValueResolver,
 	normalizeMilestoneFilterValue,
 	resolveClosestMilestoneFilterValue,
+	resolveMilestoneFilterInputs,
 } from "../utils/milestone-filter.ts";
 
 describe("milestone filter matching", () => {
@@ -39,5 +40,16 @@ describe("milestone filter matching", () => {
 		expect(resolveMilestone("7")).toBe("New Milestones UI");
 		expect(resolveMilestone("New Milestones UI")).toBe("New Milestones UI");
 		expect(resolveMilestone("m-99")).toBe("m-99");
+	});
+
+	it("resolves multiple milestone filter inputs for CLI filtering", () => {
+		const milestones = [
+			{ id: "m-1", title: "Release 1", description: "", rawContent: "" },
+			{ id: "m-2", title: "Release 2", description: "", rawContent: "" },
+		];
+
+		expect(resolveMilestoneFilterInputs(["m-1", "m-2"], milestones)).toEqual(["Release 1", "Release 2"]);
+		expect(resolveMilestoneFilterInputs(["Release-1", "release 2"], milestones)).toEqual(["Release 1", "Release 2"]);
+		expect(resolveMilestoneFilterInputs(["m-1", "m-1", "Release 1"], milestones)).toEqual(["Release 1"]);
 	});
 });

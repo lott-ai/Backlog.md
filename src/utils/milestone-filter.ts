@@ -102,3 +102,40 @@ export function resolveClosestMilestoneFilterValue(query: string, milestoneValue
 
 	return best ?? normalizedQuery;
 }
+
+function milestoneTitleForFilterValue(value: string, milestones: Milestone[]): string {
+	const normalized = normalizeMilestoneFilterValue(value);
+	for (const milestone of milestones) {
+		if (normalizeMilestoneFilterValue(milestone.title) === normalized) {
+			return milestone.title;
+		}
+	}
+	return value;
+}
+
+/** Resolve CLI milestone filter inputs (IDs, titles, aliases) to canonical milestone titles. */
+export function resolveMilestoneFilterInputs(inputs: string[], milestones: Milestone[]): string[] {
+	const resolveLabel = createMilestoneFilterValueResolver(milestones);
+	const candidateTitles = milestones.map((milestone) => milestone.title).filter(Boolean);
+	const seen = new Set<string>();
+	const resolved: string[] = [];
+
+	for (const input of inputs) {
+		const trimmed = input.trim();
+		if (!trimmed) continue;
+
+		const viaResolver = resolveLabel(trimmed);
+		const value =
+			viaResolver.toLowerCase() !== trimmed.toLowerCase()
+				? viaResolver
+				: resolveClosestMilestoneFilterValue(trimmed, candidateTitles);
+		const canonical = milestoneTitleForFilterValue(value, milestones);
+		const key = canonical.trim().toLowerCase();
+		if (!key || seen.has(key)) continue;
+
+		seen.add(key);
+		resolved.push(canonical);
+	}
+
+	return resolved;
+}
