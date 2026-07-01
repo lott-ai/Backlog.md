@@ -14,7 +14,6 @@ import {
 	type LabelMatchMode,
 	resolveConfiguredStatuses,
 } from "../utils/task-search.ts";
-import { watchTasks } from "../utils/task-watcher.ts";
 import { renderBoardTui } from "./board.ts";
 import { createLoadingScreen } from "./loading.ts";
 import { buildTaskViewerMilestoneFilterModel, viewTaskEnhanced } from "./task-viewer-with-search.ts";
@@ -196,10 +195,44 @@ export async function loadTasksForUnifiedView(
 
 type ViewResult = "switch" | "exit";
 
+const FOREGROUND_REFRESH_DEBOUNCE_MS = 300;
+
+export function filterRenderableTasks(taskList: Task[]): Task[] {
+	return taskList.filter((task) => task.id && task.id.trim() !== "" && hasAnyPrefix(task.id));
+}
+
 /**
  * Main unified view controller that handles Tab switching between views
  */
 export async function runUnifiedView(options: UnifiedViewOptions): Promise<void> {
+	let unsubscribeStore: (() => void) | null = null;
+	let configWatcherStop: (() => void) | null = null;
+	let foregroundRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const cleanupWatchers = () => {
+		unsubscribeStore?.();
+		unsubscribeStore = null;
+		configWatcherStop?.();
+		configWatcherStop = null;
+		if (foregroundRefreshTimer) {
+			clearTimeout(foregroundRefreshTimer);
+			foregroundRefreshTimer = null;
+		}
+		process.off("SIGCONT", onForegroundResume);
+	};
+
+	const onForegroundResume = () => {
+		if (foregroundRefreshTimer) {
+			clearTimeout(foregroundRefreshTimer);
+		}
+		foregroundRefreshTimer = setTimeout(() => {
+			foregroundRefreshTimer = null;
+			void refreshTasksFromDisk();
+		}, FOREGROUND_REFRESH_DEBOUNCE_MS);
+	};
+
+	let refreshTasksFromDisk = async (): Promise<void> => {};
+
 	try {
 		const { tasks: loadedTasks, statuses: loadedStatuses } = await loadTasksForUnifiedView(options.core, {
 			tasks: options.tasks,
@@ -215,7 +248,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			startupWarning = `⚠ Duplicate task IDs detected: ${ids} — use web UI for AI fix prompt`;
 		}
 
-		const baseTasks = (loadedTasks || []).filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+		const baseTasks = filterRenderableTasks(loadedTasks || []);
 		if (baseTasks.length === 0) {
 			if (options.filter?.parentTaskId) {
 				console.log(`No child tasks found for parent task ${options.filter.parentTaskId}.`);
@@ -254,9 +287,34 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		let boardUpdater: ((nextTasks: Task[], nextStatuses: string[]) => void) | null = null;
 		let taskListUpdater: ((nextTasks: Task[]) => void) | null = null;
 
-		const getRenderableTasks = () => tasks.filter((task) => task.id && task.id.trim() !== "" && hasAnyPrefix(task.id));
+		const getRenderableTasks = () => filterRenderableTasks(tasks);
 		const getBoardAvailableLabels = () => collectAvailableLabels(getRenderableTasks(), configuredLabels);
 		const getBoardAvailableMilestones = () => [...milestoneFilterModel.availableMilestoneTitles];
+
+		const applyStoreTasks = (nextTasks: Task[]) => {
+			const previousSelectedId = selectedTask?.id;
+			tasks = filterRenderableTasks(nextTasks);
+			if (previousSelectedId) {
+				const stillSelected = tasks.find((task) => task.id === previousSelectedId);
+				selectedTask = stillSelected ?? tasks[0];
+			}
+			const state = viewSwitcher?.getState();
+			viewSwitcher?.updateState({
+				tasks,
+				kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
+			});
+			emitBoardUpdate();
+			emitTaskListUpdate();
+		};
+
+		refreshTasksFromDisk = async (): Promise<void> => {
+			const refreshed = await options.core.loadTasks();
+			applyStoreTasks(refreshed);
+			const config = await options.core.filesystem.loadConfig();
+			kanbanStatuses = config?.statuses ?? kanbanStatuses;
+			configuredLabels = config?.labels ?? [];
+			emitBoardUpdate();
+		};
 
 		const emitBoardUpdate = () => {
 			if (!boardUpdater) return;
@@ -286,57 +344,25 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			core: options.core,
 			initialState,
 		});
-		const watcher = watchTasks(options.core, {
-			onTaskAdded(task) {
-				tasks.push(task);
-				const state = viewSwitcher?.getState();
-				viewSwitcher?.updateState({
-					tasks,
-					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
-				});
-				emitBoardUpdate();
-				emitTaskListUpdate();
-			},
-			onTaskChanged(task) {
-				const idx = tasks.findIndex((t) => t.id === task.id);
-				if (idx >= 0) {
-					tasks[idx] = task;
-				} else {
-					tasks.push(task);
-				}
-				const state = viewSwitcher?.getState();
-				viewSwitcher?.updateState({
-					tasks,
-					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
-				});
-				emitBoardUpdate();
-				emitTaskListUpdate();
-			},
-			onTaskRemoved(taskId) {
-				tasks = tasks.filter((t) => t.id !== taskId);
-				if (selectedTask?.id === taskId) {
-					selectedTask = tasks[0];
-				}
-				const state = viewSwitcher?.getState();
-				viewSwitcher?.updateState({
-					tasks,
-					kanbanData: state?.kanbanData ? { ...state.kanbanData, tasks } : undefined,
-				});
-				emitBoardUpdate();
-				emitTaskListUpdate();
-			},
+
+		const store = await options.core.getContentStore();
+		unsubscribeStore = store.subscribe((event) => {
+			if (event.type !== "tasks") {
+				return;
+			}
+			applyStoreTasks(event.tasks);
 		});
-		process.on("exit", () => watcher.stop());
 
 		const configWatcher = watchConfig(options.core, {
 			onConfigChanged: (config) => {
-				kanbanStatuses = config?.statuses ?? [];
+				kanbanStatuses = config?.statuses ?? kanbanStatuses;
 				configuredLabels = config?.labels ?? [];
 				emitBoardUpdate();
 			},
 		});
+		configWatcherStop = () => configWatcher.stop();
 
-		process.on("exit", () => configWatcher.stop());
+		process.on("SIGCONT", onForegroundResume);
 
 		// Function to show task view
 		const showTaskView = async (): Promise<ViewResult> => {
@@ -403,6 +429,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					},
 					onTaskRemovedFromSession: removeTaskFromSession,
 					onTabPress,
+					onManualRefresh: refreshTasksFromDisk,
 				}).then(() => {
 					taskListUpdater = null;
 					// If user wants to exit, do it immediately
@@ -460,6 +487,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					milestoneMode: options.milestoneMode,
 					milestoneEntities,
 					startupWarning,
+					onManualRefresh: refreshTasksFromDisk,
 				}).then(() => {
 					// If user wants to exit, do it immediately
 					if (result === "exit") {
@@ -511,5 +539,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exit(1);
+	} finally {
+		cleanupWatchers();
 	}
 }

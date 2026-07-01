@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as fs from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ContentStore, type ContentStoreEvent } from "../core/content-store.ts";
@@ -140,6 +141,46 @@ describe("ContentStore", () => {
 		const refreshedTasks = store.getTasks();
 		expect(refreshedTasks.map((task) => task.id)).toContain("task-remote");
 		expect(loaderCalls).toBeGreaterThanOrEqual(2);
+	});
+
+	it("refreshes all tasks when watcher event has no filename", async () => {
+		await filesystem.saveTask(sampleTask);
+
+		const originalWatch = fs.watch.bind(fs);
+		let taskWatcherCallback: ((eventType: string, filename: string | Buffer | null | undefined) => void) | undefined;
+		const watchSpy = spyOn(fs, "watch").mockImplementation(((path, options, listener) => {
+			const resolvedListener = typeof options === "function" ? options : listener;
+			if (resolvedListener && String(path).endsWith("tasks")) {
+				taskWatcherCallback = resolvedListener as typeof taskWatcherCallback;
+				return { close: () => {}, on: () => {} };
+			}
+			return originalWatch(path, options as never, listener as never);
+		}) as typeof fs.watch);
+
+		store.dispose();
+		store = new ContentStore(filesystem, undefined, true);
+
+		try {
+			await store.ensureInitialized();
+
+			const secondTask: Task = {
+				...sampleTask,
+				id: "task-2",
+				title: "Second Task",
+			};
+			await filesystem.saveTask(secondTask);
+
+			const waitForUpdate = waitForEventWithTimeout(store, (event) => {
+				return event.type === "tasks" && event.tasks.some((task) => task.id === "TASK-2");
+			});
+
+			taskWatcherCallback?.("change", null);
+			await waitForUpdate;
+
+			expect(store.getTasks().some((task) => task.id === "TASK-2")).toBe(true);
+		} finally {
+			watchSpy.mockRestore();
+		}
 	});
 
 	it("removes decisions when files are deleted", async () => {

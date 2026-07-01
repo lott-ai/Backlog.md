@@ -3,6 +3,7 @@ import type { Task } from "../types/index.ts";
 import {
 	createKanbanSharedFilters,
 	createUnifiedViewFilters,
+	filterRenderableTasks,
 	filterTasksForKanban,
 	mergeUnifiedViewFilters,
 	type UnifiedViewFilters,
@@ -11,6 +12,17 @@ import { NO_MILESTONE_FILTER_VALUE } from "../utils/milestone-filter.ts";
 import { applyTaskFilters } from "../utils/task-search.ts";
 
 describe("unified view filter state", () => {
+	it("filters renderable tasks by id prefix", () => {
+		const tasks: Task[] = [
+			{ id: "task-1", title: "One" } as Task,
+			{ id: "", title: "Empty" } as Task,
+			{ id: "plainid", title: "Invalid" } as Task,
+			{ id: "task-2", title: "Two" } as Task,
+		];
+
+		expect(filterRenderableTasks(tasks).map((task) => task.id)).toEqual(["task-1", "task-2"]);
+	});
+
 	it("initializes milestone filter from options", () => {
 		const labels = ["backend"];
 		const filters = createUnifiedViewFilters({

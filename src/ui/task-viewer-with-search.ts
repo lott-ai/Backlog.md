@@ -190,6 +190,7 @@ export async function viewTaskEnhanced(
 		onTabPress?: () => Promise<void>;
 		onTaskRemovedFromSession?: (taskId: string) => void;
 		subscribeUpdates?: (updater: (nextTasks: Task[]) => void) => void;
+		onManualRefresh?: () => Promise<void>;
 		onFilterChange?: (filters: {
 			searchQuery: string;
 			statusFilter: string[];
@@ -1285,6 +1286,13 @@ export async function viewTaskEnhanced(
 	screen.key(["?"], async () => {
 		if (modalOpen || filterPopupOpen) return;
 		await runWithModalGuard(() => openHelpPopup(screen, "task-list"));
+	});
+
+	screen.key(["r", "R"], async () => {
+		if (modalOpen || filterPopupOpen || currentFocus === "filters") return;
+		if (!options.onManualRefresh) return;
+		await options.onManualRefresh();
+		showTransientHelp(" {green-fg}Refreshed{/}");
 	});
 
 	screen.key(["escape"], () => {

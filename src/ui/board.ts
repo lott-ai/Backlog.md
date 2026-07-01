@@ -192,6 +192,7 @@ export async function renderBoardTui(
 		onTabPress?: () => Promise<void>;
 		onTaskRemovedFromSession?: (taskId: string) => void;
 		subscribeUpdates?: (update: (nextTasks: Task[], nextStatuses: string[]) => void) => void;
+		onManualRefresh?: () => Promise<void>;
 		filters?: {
 			searchQuery: string;
 			priorityFilter: string[];
@@ -1374,6 +1375,13 @@ export async function renderBoardTui(
 		screen.key(["?"], async () => {
 			if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
 			await runWithModalGuard(() => openHelpPopup(screen));
+		});
+
+		screen.key(["r", "R"], async () => {
+			if (popupOpen || filterPopupOpen || modalOpen || moveOp || currentFocus === "filters") return;
+			if (!options?.onManualRefresh) return;
+			await options.onManualRefresh();
+			showTransientFooter(" {green-fg}Refreshed{/}");
 		});
 
 		screen.key(["y", "Y"], async () => {

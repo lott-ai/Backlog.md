@@ -274,6 +274,10 @@ function printToolResult(result: CallToolResult): void {
 	}
 }
 
+function createInteractiveCore(projectRoot: string): Core {
+	return new Core(projectRoot, { enableWatchers: true });
+}
+
 async function runMilestoneMutation(action: (handlers: MilestoneHandlers) => Promise<CallToolResult>): Promise<void> {
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
@@ -1761,7 +1765,7 @@ addHelpSchema(program.command("search [query]"), {
 	.option("--plain", "print plain text output instead of interactive UI")
 	.action(async (query: string | undefined, options) => {
 		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
+		const core = createInteractiveCore(cwd);
 		const searchService = await core.getSearchService();
 		const contentStore = await core.getContentStore();
 		const cleanup = () => {
@@ -2076,7 +2080,7 @@ addHelpSchema(taskCmd.command("list"), {
 	.option("--plain", "use plain text output instead of interactive UI")
 	.action(async (options) => {
 		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
+		const core = createInteractiveCore(cwd);
 		const cleanup = () => {
 			core.disposeSearchService();
 			core.disposeContentStore();
@@ -2985,7 +2989,7 @@ taskCmd
 	.option("--plain", "use plain text output")
 	.action(async (taskId: string | undefined, options: { plain?: boolean }) => {
 		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
+		const core = createInteractiveCore(cwd);
 
 		// Don't handle commands that should be handled by specific command handlers
 		const reservedCommands = ["create", "list", "edit", "view", "archive", "complete", "demote"];
@@ -3038,7 +3042,7 @@ draftCmd
 	.option("--plain", "use plain text output")
 	.action(async (options: { plain?: boolean; sort?: string }) => {
 		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
+		const core = createInteractiveCore(cwd);
 		await core.ensureConfigLoaded();
 		const drafts = await core.filesystem.listDrafts();
 
@@ -3394,7 +3398,7 @@ function addBoardOptions(cmd: Command) {
 
 async function handleBoardView(options: { layout?: string; vertical?: boolean; milestones?: boolean }) {
 	const cwd = await requireProjectRoot();
-	const core = new Core(cwd);
+	const core = createInteractiveCore(cwd);
 	const config = await core.filesystem.loadConfig();
 
 	const statuses = config?.statuses || [];
