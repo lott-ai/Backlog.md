@@ -5,19 +5,104 @@ import { formatMultiSelectSummary } from "./label-filter.ts";
 export const NO_MILESTONE_FILTER_VALUE = "\u0000no-milestone";
 export const NO_MILESTONE_FILTER_LABEL = "No milestone";
 
-export function milestoneValuesToPickerLabels(values: string[]): string[] {
-	return values.map((value) => (value === NO_MILESTONE_FILTER_VALUE ? NO_MILESTONE_FILTER_LABEL : value));
+export function formatMilestonePickerLabel(milestone: Pick<Milestone, "id" | "title">): string {
+	const id = milestone.id.trim();
+	const title = milestone.title.trim();
+	if (id && title) {
+		return `${id} - ${title}`;
+	}
+	return title || id;
 }
 
-export function milestonePickerLabelsToValues(labels: string[]): string[] {
-	return labels.map((label) => (label === NO_MILESTONE_FILTER_LABEL ? NO_MILESTONE_FILTER_VALUE : label));
+export function buildMilestonePickerLabels(milestones: Milestone[]): string[] {
+	return milestones
+		.filter((milestone) => milestone.id.trim() && milestone.title.trim())
+		.map((milestone) => formatMilestonePickerLabel(milestone))
+		.sort((left, right) => left.localeCompare(right));
 }
 
-export function formatMilestoneFilterSummary(values: string[], fallback = "All"): string {
+function findMilestoneForFilterValue(value: string, milestones: Milestone[]): Milestone | undefined {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+
+	const resolver = createMilestoneFilterValueResolver(milestones);
+	const resolvedTitle = resolver(trimmed);
+	return milestones.find(
+		(milestone) =>
+			milestone.title.trim().toLowerCase() === resolvedTitle.trim().toLowerCase() ||
+			milestone.id.trim().toLowerCase() === trimmed.toLowerCase(),
+	);
+}
+
+export function buildAvailableMilestonePickerLabels(
+	milestones: Milestone[],
+	extraFilterValues: string[] = [],
+): string[] {
+	const labels = buildMilestonePickerLabels(milestones);
+	const coveredLabels = new Set(labels.map((label) => label.toLowerCase()));
+	const resolver = createMilestoneFilterValueResolver(milestones);
+
+	for (const value of extraFilterValues) {
+		const trimmed = value.trim();
+		if (!trimmed) {
+			continue;
+		}
+		const milestone = findMilestoneForFilterValue(trimmed, milestones);
+		const label = milestone ? formatMilestonePickerLabel(milestone) : resolver(trimmed);
+		const key = label.trim().toLowerCase();
+		if (!key || coveredLabels.has(key)) {
+			continue;
+		}
+		labels.push(label);
+		coveredLabels.add(key);
+	}
+
+	return labels.sort((left, right) => left.localeCompare(right));
+}
+
+export function milestoneValuesToPickerLabels(values: string[], milestones: Milestone[] = []): string[] {
+	return values.map((value) => {
+		if (value === NO_MILESTONE_FILTER_VALUE) {
+			return NO_MILESTONE_FILTER_LABEL;
+		}
+		if (milestones.length === 0) {
+			return value;
+		}
+		const milestone = findMilestoneForFilterValue(value, milestones);
+		return milestone ? formatMilestonePickerLabel(milestone) : value;
+	});
+}
+
+export function milestonePickerLabelsToValues(labels: string[], milestones: Milestone[] = []): string[] {
+	return labels.map((label) => {
+		if (label === NO_MILESTONE_FILTER_LABEL) {
+			return NO_MILESTONE_FILTER_VALUE;
+		}
+		if (milestones.length > 0) {
+			const byPickerLabel = milestones.find((milestone) => formatMilestonePickerLabel(milestone) === label);
+			if (byPickerLabel) {
+				return byPickerLabel.title.trim();
+			}
+			const byTitle = milestones.find((milestone) => milestone.title.trim() === label);
+			if (byTitle) {
+				return byTitle.title.trim();
+			}
+		}
+		const separatorIndex = label.indexOf(" - ");
+		if (separatorIndex > 0) {
+			return label.slice(separatorIndex + 3).trim();
+		}
+		return label;
+	});
+}
+
+export function formatMilestoneFilterSummary(values: string[], fallback = "All", milestones: Milestone[] = []): string {
 	if (!values.length) {
 		return fallback;
 	}
-	return formatMultiSelectSummary(milestoneValuesToPickerLabels(values), fallback);
+	return formatMultiSelectSummary(milestoneValuesToPickerLabels(values, milestones), fallback);
 }
 
 interface MilestoneCandidate {

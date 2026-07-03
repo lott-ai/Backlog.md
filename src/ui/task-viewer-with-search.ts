@@ -14,6 +14,7 @@ import type { Milestone, Task, TaskSearchResult } from "../types/index.ts";
 import { copyToClipboard } from "../utils/clipboard.ts";
 import { areLabelSelectionsEqual, collectAvailableLabels, labelsToLower } from "../utils/label-filter.ts";
 import {
+	buildMilestonePickerLabels,
 	milestonePickerLabelsToValues,
 	milestoneValuesToPickerLabels,
 	NO_MILESTONE_FILTER_LABEL,
@@ -82,11 +83,11 @@ function createMilestoneLabelResolver(milestones: Milestone[]): (milestone: stri
 }
 
 export function buildTaskViewerMilestoneFilterModel(activeMilestones: Milestone[]): {
-	availableMilestoneTitles: string[];
+	availableMilestonePickerLabels: string[];
 	resolveMilestoneLabel: (milestone: string) => string;
 } {
 	return {
-		availableMilestoneTitles: activeMilestones.map((milestone) => milestone.title),
+		availableMilestonePickerLabels: buildMilestonePickerLabels(activeMilestones),
 		resolveMilestoneLabel: createMilestoneLabelResolver(activeMilestones),
 	};
 }
@@ -220,7 +221,8 @@ export async function viewTaskEnhanced(
 	let searchService: Awaited<ReturnType<typeof core.getSearchService>> | null = null;
 	let contentStore: Awaited<ReturnType<typeof core.getContentStore>> | null = null;
 	const milestoneEntities = await core.filesystem.listMilestones();
-	const { availableMilestoneTitles, resolveMilestoneLabel } = buildTaskViewerMilestoneFilterModel(milestoneEntities);
+	const { availableMilestonePickerLabels, resolveMilestoneLabel } =
+		buildTaskViewerMilestoneFilterModel(milestoneEntities);
 
 	if (options.tasks) {
 		// Tasks already provided - use in-memory search (no ContentStore loading)
@@ -390,15 +392,15 @@ export async function viewTaskEnhanced(
 				return;
 			}
 
-			const milestonePickerItems = [NO_MILESTONE_FILTER_LABEL, ...availableMilestoneTitles];
+			const milestonePickerItems = [NO_MILESTONE_FILTER_LABEL, ...availableMilestonePickerLabels];
 			const nextMilestones = await openMultiSelectFilterPopup({
 				screen,
 				title: "Milestone Filter",
 				items: milestonePickerItems,
-				selectedItems: milestoneValuesToPickerLabels(milestoneFilter),
+				selectedItems: milestoneValuesToPickerLabels(milestoneFilter, milestoneEntities),
 			});
 			if (nextMilestones !== null) {
-				milestoneFilter = milestonePickerLabelsToValues(nextMilestones);
+				milestoneFilter = milestonePickerLabelsToValues(nextMilestones, milestoneEntities);
 				filterHeader.setFilters({ milestone: milestoneFilter });
 				applyFilters();
 				notifyFilterChange();
@@ -414,7 +416,8 @@ export async function viewTaskEnhanced(
 		parent: container,
 		statuses,
 		availableLabels,
-		availableMilestones: availableMilestoneTitles,
+		availableMilestones: availableMilestonePickerLabels,
+		milestoneEntities,
 		initialFilters: {
 			search: searchQuery,
 			status: statusFilter,
@@ -703,7 +706,9 @@ export async function viewTaskEnhanced(
 				activeFilters.push(`Labels: {yellow-fg}${labelFilter.join(", ")}{/}`);
 			}
 			if (milestoneFilter.length > 0) {
-				activeFilters.push(`Milestone: {magenta-fg}${milestoneValuesToPickerLabels(milestoneFilter).join(", ")}{/}`);
+				activeFilters.push(
+					`Milestone: {magenta-fg}${milestoneValuesToPickerLabels(milestoneFilter, milestoneEntities).join(", ")}{/}`,
+				);
 			}
 			let listPaneMessage: string;
 			if (activeFilters.length > 0) {

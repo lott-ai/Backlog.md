@@ -11,6 +11,7 @@ import type { Milestone, Task } from "../types/index.ts";
 import { copyToClipboard } from "../utils/clipboard.ts";
 import { areLabelSelectionsEqual, collectAvailableLabels } from "../utils/label-filter.ts";
 import {
+	buildAvailableMilestonePickerLabels,
 	milestonePickerLabelsToValues,
 	milestoneValuesToPickerLabels,
 	NO_MILESTONE_FILTER_LABEL,
@@ -274,9 +275,9 @@ export async function renderBoardTui(
 			}
 		};
 		let configuredLabels = collectAvailableLabels(initialTasks, options?.availableLabels ?? []);
-		let availableMilestones = [...(options?.availableMilestones ?? [])];
+		const milestoneEntities = options?.milestoneEntities ?? [];
 		const milestoneLabelByKey = new Map<string, string>();
-		for (const milestone of options?.milestoneEntities ?? []) {
+		for (const milestone of milestoneEntities) {
 			const normalizedId = milestone.id.trim();
 			const normalizedTitle = milestone.title.trim();
 			if (!normalizedId || !normalizedTitle) continue;
@@ -294,15 +295,16 @@ export async function renderBoardTui(
 			if (!normalized) return milestone;
 			return milestoneLabelByKey.get(normalized.toLowerCase()) ?? milestone;
 		};
-		availableMilestones = Array.from(
+		const extraMilestoneFilterValues = Array.from(
 			new Set([
-				...availableMilestones,
+				...(options?.availableMilestones ?? []),
 				...initialTasks
 					.map((task) => task.milestone?.trim())
 					.filter((milestone): milestone is string => Boolean(milestone && milestone.length > 0))
 					.map((milestone) => resolveMilestoneLabel(milestone)),
 			]),
-		).sort((a, b) => a.localeCompare(b));
+		);
+		let availableMilestones = buildAvailableMilestonePickerLabels(milestoneEntities, extraMilestoneFilterValues);
 
 		let filterHeader: FilterHeader | null = null;
 		const hasActiveSharedFilters = () =>
@@ -699,10 +701,10 @@ export async function renderBoardTui(
 					screen,
 					title: "Milestone Filter",
 					items: milestonePickerItems,
-					selectedItems: milestoneValuesToPickerLabels(sharedFilters.milestoneFilter),
+					selectedItems: milestoneValuesToPickerLabels(sharedFilters.milestoneFilter, milestoneEntities),
 				});
 				if (nextMilestones !== null) {
-					sharedFilters.milestoneFilter = milestonePickerLabelsToValues(nextMilestones);
+					sharedFilters.milestoneFilter = milestonePickerLabelsToValues(nextMilestones, milestoneEntities);
 					filterHeader.setFilters({ milestone: sharedFilters.milestoneFilter });
 					emitFilterChange();
 					renderView();
@@ -719,6 +721,7 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableMilestones,
+			milestoneEntities,
 			visibleFilters: ["search", "priority", "milestone", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
@@ -855,15 +858,18 @@ export async function renderBoardTui(
 			// Only update statuses if they changed (rare in TUI)
 			if (nextStatuses.length > 0) currentStatuses = nextStatuses;
 			configuredLabels = collectAvailableLabels(currentTasks, options?.availableLabels ?? []);
-			availableMilestones = Array.from(
-				new Set([
-					...(options?.availableMilestones ?? []),
-					...currentTasks
-						.map((task) => task.milestone?.trim())
-						.filter((milestone): milestone is string => Boolean(milestone && milestone.length > 0))
-						.map((milestone) => resolveMilestoneLabel(milestone)),
-				]),
-			).sort((a, b) => a.localeCompare(b));
+			availableMilestones = buildAvailableMilestonePickerLabels(
+				milestoneEntities,
+				Array.from(
+					new Set([
+						...(options?.availableMilestones ?? []),
+						...currentTasks
+							.map((task) => task.milestone?.trim())
+							.filter((milestone): milestone is string => Boolean(milestone && milestone.length > 0))
+							.map((milestone) => resolveMilestoneLabel(milestone)),
+					]),
+				),
+			);
 
 			renderView();
 		};

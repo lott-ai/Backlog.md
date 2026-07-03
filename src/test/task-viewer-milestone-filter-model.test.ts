@@ -10,7 +10,7 @@ describe("task viewer milestone filter model", () => {
 		];
 
 		const model = buildTaskViewerMilestoneFilterModel(milestones);
-		expect(model.availableMilestoneTitles).toEqual(["Release 1", "Release 2"]);
+		expect(model.availableMilestonePickerLabels).toEqual(["m-1 - Release 1", "m-2 - Release 2"]);
 	});
 
 	it("resolves only configured milestone aliases and leaves unknown milestone ids unchanged", () => {

@@ -289,7 +289,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 
 		const getRenderableTasks = () => filterRenderableTasks(tasks);
 		const getBoardAvailableLabels = () => collectAvailableLabels(getRenderableTasks(), configuredLabels);
-		const getBoardAvailableMilestones = () => [...milestoneFilterModel.availableMilestoneTitles];
+		const getBoardAvailableMilestones = () => [...milestoneFilterModel.availableMilestonePickerLabels];
 
 		const applyStoreTasks = (nextTasks: Task[]) => {
 			const previousSelectedId = selectedTask?.id;

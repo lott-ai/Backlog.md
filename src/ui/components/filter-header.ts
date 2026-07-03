@@ -5,6 +5,7 @@
 
 import type { BoxInterface, ScreenInterface, TextboxInterface } from "neo-neo-bblessed";
 import { box, textbox } from "neo-neo-bblessed";
+import type { Milestone } from "../../types/index.ts";
 import { formatLabelSummary, formatMultiSelectSummary } from "../../utils/label-filter.ts";
 import { formatMilestoneFilterSummary } from "../../utils/milestone-filter.ts";
 
@@ -23,6 +24,7 @@ export interface FilterHeaderOptions {
 	statuses: string[];
 	availableLabels: string[];
 	availableMilestones: string[];
+	milestoneEntities?: Milestone[];
 	initialFilters?: Partial<FilterState>;
 	visibleFilters?: FilterControlId[];
 	onFilterChange: (filters: FilterState) => void;
@@ -602,7 +604,7 @@ export class FilterHeader {
 			case "priority":
 				return `${formatMultiSelectSummary(this.state.priority, "All")} ▼`;
 			case "milestone":
-				return `${formatMilestoneFilterSummary(this.state.milestone, "All")} ▼`;
+				return `${formatMilestoneFilterSummary(this.state.milestone, "All", this.options.milestoneEntities ?? [])} ▼`;
 			case "labels": {
 				const summary = formatLabelSummary(this.state.labels).replace(/^Labels:\s*/, "");
 				return `${summary} ▼`;

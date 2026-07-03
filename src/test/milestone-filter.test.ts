@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
 	createMilestoneFilterValueResolver,
+	milestonePickerLabelsToValues,
+	milestoneValuesToPickerLabels,
 	normalizeMilestoneFilterValue,
 	resolveClosestMilestoneFilterValue,
 	resolveMilestoneFilterInputs,
@@ -51,5 +53,23 @@ describe("milestone filter matching", () => {
 		expect(resolveMilestoneFilterInputs(["m-1", "m-2"], milestones)).toEqual(["Release 1", "Release 2"]);
 		expect(resolveMilestoneFilterInputs(["Release-1", "release 2"], milestones)).toEqual(["Release 1", "Release 2"]);
 		expect(resolveMilestoneFilterInputs(["m-1", "m-1", "Release 1"], milestones)).toEqual(["Release 1"]);
+	});
+
+	it("formats milestone picker labels as id and title", () => {
+		const milestones = [
+			{
+				id: "m-0",
+				title: "Spinnaker E2E runner optimization support",
+				description: "",
+				rawContent: "",
+			},
+		];
+
+		expect(milestoneValuesToPickerLabels(["Spinnaker E2E runner optimization support"], milestones)).toEqual([
+			"m-0 - Spinnaker E2E runner optimization support",
+		]);
+		expect(milestonePickerLabelsToValues(["m-0 - Spinnaker E2E runner optimization support"], milestones)).toEqual([
+			"Spinnaker E2E runner optimization support",
+		]);
 	});
 });

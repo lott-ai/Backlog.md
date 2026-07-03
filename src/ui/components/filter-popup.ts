@@ -244,7 +244,7 @@ export async function openMultiSelectFilterPopup(options: {
 		});
 
 		const selectedSet = new Set(options.selectedItems.map((item) => item.toLowerCase()));
-		const selectableItems = options.items.map((label) => ({ id: label, title: label }));
+		const selectableItems = options.items.map((label) => ({ id: label }));
 		const selectedIndices = selectableItems
 			.map((item, index) => (selectedSet.has(item.id.toLowerCase()) ? index : -1))
 			.filter((index) => index >= 0);
