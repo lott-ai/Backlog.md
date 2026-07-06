@@ -1,10 +1,16 @@
 import type { Command } from "commander";
 import {
 	addProject,
+	addScanIgnore,
+	addScanRoot,
 	DEFAULT_GLOBAL_PORT,
 	listProjects,
+	listScanIgnores,
+	listScanRoots,
 	loadGlobalConfig,
 	removeProject,
+	removeScanIgnore,
+	removeScanRoot,
 	scanProjects,
 } from "../global/registry.ts";
 import { GlobalBacklogServer } from "../server/global.ts";
@@ -71,6 +77,97 @@ export function registerGlobalCommand(program: Command): void {
 				console.log(`Removed project ${key}`);
 			} catch (err) {
 				console.error("Failed to remove project", err);
+				process.exitCode = 1;
+			}
+		});
+
+	globalCmd
+		.command("scan [path]")
+		.description("manage default scan paths used by `backlog global projects scan`")
+		.option("--list", "list configured scan paths")
+		.option("--remove", "remove the given scan path")
+		.option("--ignore", "add the path to the scan ignore list")
+		.action(async (scanPath: string | undefined, options: { list?: boolean; remove?: boolean; ignore?: boolean }) => {
+			try {
+				if (options.list) {
+					if (options.remove || options.ignore) {
+						console.error("Cannot combine --list with --remove or --ignore.");
+						process.exitCode = 1;
+						return;
+					}
+					const roots = await listScanRoots();
+					const ignores = await listScanIgnores();
+					if (roots.length === 0 && ignores.length === 0) {
+						console.log("No scan paths configured.");
+						return;
+					}
+					if (roots.length > 0) {
+						console.log("Scan paths:\n");
+						for (const root of roots) {
+							console.log(`  ${root}`);
+						}
+					}
+					if (ignores.length > 0) {
+						if (roots.length > 0) {
+							console.log("");
+						}
+						console.log("Ignore paths:\n");
+						for (const ignore of ignores) {
+							console.log(`  ${ignore}`);
+						}
+					}
+					return;
+				}
+
+				if (!scanPath) {
+					console.error("Path is required unless using --list.");
+					process.exitCode = 1;
+					return;
+				}
+
+				if (options.remove && options.ignore) {
+					console.error("Cannot combine --remove with --ignore.");
+					process.exitCode = 1;
+					return;
+				}
+
+				if (options.remove) {
+					const removedFromRoots = await removeScanRoot(scanPath);
+					if (removedFromRoots) {
+						console.log(`Removed scan path ${scanPath}`);
+						return;
+					}
+					const removedFromIgnores = await removeScanIgnore(scanPath);
+					if (!removedFromIgnores) {
+						console.error(`Scan path not found: ${scanPath}`);
+						process.exitCode = 1;
+						return;
+					}
+					console.log(`Removed ignore path ${scanPath}`);
+					return;
+				}
+
+				if (options.ignore) {
+					const added = await addScanIgnore(scanPath);
+					if (!added) {
+						console.error(`Ignore path already configured: ${scanPath}`);
+						process.exitCode = 1;
+						return;
+					}
+					console.log(`Added ignore path ${scanPath}`);
+					return;
+				}
+
+				const added = await addScanRoot(scanPath);
+				if (!added) {
+					console.error(`Scan path already configured: ${scanPath}`);
+					process.exitCode = 1;
+					return;
+				}
+				console.log(`Added scan path ${scanPath}`);
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error(message);
 				process.exitCode = 1;
 			}
 		});

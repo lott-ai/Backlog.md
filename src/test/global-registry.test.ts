@@ -1,14 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	addProject,
+	addScanIgnore,
+	addScanRoot,
 	deriveProjectKey,
+	listScanIgnores,
+	listScanRoots,
 	loadGlobalConfig,
 	parseGlobalConfig,
 	removeProject,
+	removeScanIgnore,
+	removeScanRoot,
 	saveGlobalConfig,
+	scanProjects,
 	serializeGlobalConfig,
 	touchProjectRegistry,
 } from "../global/registry.ts";
@@ -40,6 +47,7 @@ describe("global registry", () => {
 		const config = {
 			defaultPort: 6421,
 			scanRoots: ["~/github.com"],
+			scanIgnores: [],
 			projects: [
 				{
 					key: "demo",
@@ -69,6 +77,71 @@ describe("global registry", () => {
 		await removeProject(entry.key);
 		const afterRemove = await loadGlobalConfig();
 		expect(afterRemove.projects.some((p) => p.key === entry.key)).toBe(false);
+	});
+
+	it("lists, adds, and removes scan paths", async () => {
+		await saveGlobalConfig({
+			defaultPort: 6421,
+			scanRoots: ["~/github.com"],
+			scanIgnores: [],
+			projects: [],
+		});
+
+		expect(await listScanRoots()).toEqual([join(homedir(), "github.com")]);
+
+		const added = await addScanRoot("~/projects");
+		expect(added).toBe(true);
+		expect(await listScanRoots()).toEqual([join(homedir(), "github.com"), join(homedir(), "projects")]);
+
+		const duplicate = await addScanRoot("~/projects");
+		expect(duplicate).toBe(false);
+
+		const removed = await removeScanRoot("~/github.com");
+		expect(removed).toBe(true);
+		expect(await listScanRoots()).toEqual([join(homedir(), "projects")]);
+
+		const missing = await removeScanRoot("~/missing");
+		expect(missing).toBe(false);
+	});
+
+	it("lists, adds, and removes scan ignore paths", async () => {
+		await saveGlobalConfig({
+			defaultPort: 6421,
+			scanRoots: [],
+			scanIgnores: [],
+			projects: [],
+		});
+
+		const added = await addScanIgnore("~/github.com/MrLesk/Backlog.md/tmp");
+		expect(added).toBe(true);
+		expect(await listScanIgnores()).toEqual([join(homedir(), "github.com/MrLesk/Backlog.md/tmp")]);
+
+		const duplicate = await addScanIgnore("~/github.com/MrLesk/Backlog.md/tmp");
+		expect(duplicate).toBe(false);
+
+		const removed = await removeScanIgnore("~/github.com/MrLesk/Backlog.md/tmp");
+		expect(removed).toBe(true);
+		expect(await listScanIgnores()).toEqual([]);
+	});
+
+	it("skips ignored paths when scanning for projects", async () => {
+		const scanRoot = join(TEST_ROOT, "scan-root");
+		const includedProject = join(scanRoot, "included");
+		const ignoredProject = join(scanRoot, "ignored", "nested");
+		for (const projectDir of [includedProject, ignoredProject]) {
+			await mkdir(join(projectDir, "backlog", "tasks"), { recursive: true });
+			await Bun.write(join(projectDir, "backlog", "config.yml"), 'project_name: "Scan Test"\n');
+		}
+
+		await saveGlobalConfig({
+			defaultPort: 6421,
+			scanRoots: [scanRoot],
+			scanIgnores: [join(scanRoot, "ignored")],
+			projects: [],
+		});
+
+		const found = await scanProjects();
+		expect(found.map((project) => project.path)).toEqual([resolve(includedProject)]);
 	});
 
 	it("touch updates lastSeen for existing project", async () => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { Core } from "../core/backlog.ts";
 import { resolveBacklogDirectory } from "../utils/backlog-directory.ts";
 import { getGlobalConfigPath, getLegacyGlobalConfigPath } from "./config-path.ts";
@@ -16,6 +16,7 @@ export interface RegisteredProject {
 export interface GlobalConfig {
 	defaultPort: number;
 	scanRoots: string[];
+	scanIgnores: string[];
 	projects: RegisteredProject[];
 }
 
@@ -118,6 +119,7 @@ export function parseGlobalConfig(content: string): GlobalConfig {
 	const config: GlobalConfig = {
 		defaultPort: DEFAULT_GLOBAL_PORT,
 		scanRoots: [],
+		scanIgnores: [],
 		projects: [],
 	};
 	const lines = content.split(/\r?\n/);
@@ -136,6 +138,12 @@ export function parseGlobalConfig(content: string): GlobalConfig {
 			i = parsed.nextIndex - 1;
 			continue;
 		}
+		if (line === "scanIgnores:") {
+			const parsed = parseYamlListBlock(lines, i + 1);
+			config.scanIgnores = parsed.items.map(expandHome);
+			i = parsed.nextIndex - 1;
+			continue;
+		}
 		if (line === "projects:") {
 			const parsed = parseProjectsBlock(lines, i + 1);
 			config.projects = parsed.projects;
@@ -149,6 +157,10 @@ export function serializeGlobalConfig(config: GlobalConfig): string {
 	const lines: string[] = [`defaultPort: ${config.defaultPort}`, "scanRoots:"];
 	for (const root of config.scanRoots) {
 		lines.push(`  - "${root.replace(/"/g, '\\"')}"`);
+	}
+	lines.push("scanIgnores:");
+	for (const ignore of config.scanIgnores) {
+		lines.push(`  - "${ignore.replace(/"/g, '\\"')}"`);
 	}
 	lines.push("projects:");
 	for (const project of config.projects) {
@@ -191,6 +203,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
 	return {
 		defaultPort: DEFAULT_GLOBAL_PORT,
 		scanRoots: [],
+		scanIgnores: [],
 		projects: [],
 	};
 }
@@ -266,6 +279,85 @@ export async function removeProject(key: string): Promise<boolean> {
 	return true;
 }
 
+function normalizeScanRoot(path: string): string {
+	return resolve(expandHome(path));
+}
+
+export async function listScanRoots(): Promise<string[]> {
+	const config = await loadGlobalConfig();
+	return [...config.scanRoots];
+}
+
+export async function addScanRoot(scanPath: string): Promise<boolean> {
+	const trimmed = scanPath.trim();
+	if (!trimmed) {
+		throw new Error("Scan path cannot be empty.");
+	}
+	const config = await loadGlobalConfig();
+	const target = normalizeScanRoot(trimmed);
+	if (config.scanRoots.some((root) => normalizeScanRoot(root) === target)) {
+		return false;
+	}
+	config.scanRoots.push(trimmed);
+	await saveGlobalConfig(config);
+	return true;
+}
+
+export async function removeScanRoot(scanPath: string): Promise<boolean> {
+	const config = await loadGlobalConfig();
+	const target = normalizeScanRoot(scanPath);
+	const index = config.scanRoots.findIndex((root) => normalizeScanRoot(root) === target);
+	if (index === -1) {
+		return false;
+	}
+	config.scanRoots.splice(index, 1);
+	await saveGlobalConfig(config);
+	return true;
+}
+
+export async function listScanIgnores(): Promise<string[]> {
+	const config = await loadGlobalConfig();
+	return [...config.scanIgnores];
+}
+
+export async function addScanIgnore(scanPath: string): Promise<boolean> {
+	const trimmed = scanPath.trim();
+	if (!trimmed) {
+		throw new Error("Scan path cannot be empty.");
+	}
+	const config = await loadGlobalConfig();
+	const target = normalizeScanRoot(trimmed);
+	if (config.scanIgnores.some((ignore) => normalizeScanRoot(ignore) === target)) {
+		return false;
+	}
+	config.scanIgnores.push(trimmed);
+	await saveGlobalConfig(config);
+	return true;
+}
+
+export async function removeScanIgnore(scanPath: string): Promise<boolean> {
+	const config = await loadGlobalConfig();
+	const target = normalizeScanRoot(scanPath);
+	const index = config.scanIgnores.findIndex((ignore) => normalizeScanRoot(ignore) === target);
+	if (index === -1) {
+		return false;
+	}
+	config.scanIgnores.splice(index, 1);
+	await saveGlobalConfig(config);
+	return true;
+}
+
+function isScanPathIgnored(dir: string, ignores: string[]): boolean {
+	const normalized = resolve(dir);
+	for (const ignore of ignores) {
+		const ignoreRoot = normalizeScanRoot(ignore);
+		if (normalized === ignoreRoot || normalized.startsWith(`${ignoreRoot}${sep}`)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 const SKIP_DIR_NAMES = new Set([
 	"node_modules",
 	".git",
@@ -283,8 +375,9 @@ async function scanDirectoryForProjects(
 	found: Map<string, RegisteredProject>,
 	depth: number,
 	maxDepth: number,
+	ignores: string[],
 ): Promise<void> {
-	if (depth > maxDepth) {
+	if (depth > maxDepth || isScanPathIgnored(dir, ignores)) {
 		return;
 	}
 	let entries: string[];
@@ -309,7 +402,7 @@ async function scanDirectoryForProjects(
 		try {
 			const childStat = await stat(child);
 			if (childStat.isDirectory()) {
-				await scanDirectoryForProjects(child, found, depth + 1, maxDepth);
+				await scanDirectoryForProjects(child, found, depth + 1, maxDepth, ignores);
 			}
 		} catch {
 			// skip unreadable paths
@@ -320,15 +413,19 @@ async function scanDirectoryForProjects(
 export async function scanProjects(roots?: string[]): Promise<RegisteredProject[]> {
 	const config = await loadGlobalConfig();
 	const scanRoots = (roots?.length ? roots : config.scanRoots).map((r) => resolve(expandHome(r)));
+	const ignores = config.scanIgnores;
 	const found = new Map<string, RegisteredProject>();
 
 	for (const root of scanRoots) {
+		if (isScanPathIgnored(root, ignores)) {
+			continue;
+		}
 		try {
 			const rootStat = await stat(root);
 			if (!rootStat.isDirectory()) {
 				continue;
 			}
-			await scanDirectoryForProjects(root, found, 0, 8);
+			await scanDirectoryForProjects(root, found, 0, 8, ignores);
 		} catch {
 			// skip missing roots
 		}

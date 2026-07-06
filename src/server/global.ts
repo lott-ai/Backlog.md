@@ -1085,6 +1085,7 @@ export class GlobalBacklogServer {
 		return Response.json({
 			defaultPort: config.defaultPort,
 			scanRoots: config.scanRoots,
+			scanIgnores: config.scanIgnores,
 			projects: config.projects,
 		});
 	}
