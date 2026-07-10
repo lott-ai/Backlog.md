@@ -1188,6 +1188,8 @@ export class Core {
 				createdDate,
 				...(input.parentTaskId && { parentTaskId: input.parentTaskId }),
 				...(priority && { priority }),
+				...(typeof input.model === "string" && input.model.trim().length > 0 && { model: input.model.trim() }),
+				...(typeof input.effort === "string" && input.effort.trim().length > 0 && { effort: input.effort.trim() }),
 				...(typeof ordinal === "number" && { ordinal }),
 				...(typeof input.milestone === "string" &&
 					input.milestone.trim().length > 0 && {
@@ -1311,6 +1313,28 @@ export class Core {
 				mutated = true;
 			}
 		}
+
+		const applyOptionalHint = (
+			value: string | null | undefined,
+			current: string | undefined,
+			assign: (next: string | undefined) => void,
+		) => {
+			if (value === undefined) return;
+			const normalized = value === null ? undefined : value.trim().length > 0 ? value.trim() : undefined;
+			if ((current ?? undefined) !== normalized) {
+				assign(normalized);
+				mutated = true;
+			}
+		};
+
+		applyOptionalHint(input.model, task.model, (next) => {
+			if (next === undefined) delete task.model;
+			else task.model = next;
+		});
+		applyOptionalHint(input.effort, task.effort, (next) => {
+			if (next === undefined) delete task.effort;
+			else task.effort = next;
+		});
 
 		if (input.milestone !== undefined) {
 			const normalizedMilestone =

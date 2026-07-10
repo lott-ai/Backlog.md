@@ -65,6 +65,10 @@ export interface Task {
 	subtasks?: string[];
 	subtaskSummaries?: Array<{ id: string; title: string }>;
 	priority?: "high" | "medium" | "low";
+	/** Optional free-form model hint (e.g. "opus", "sonnet") for agents/harnesses running this task */
+	model?: string;
+	/** Optional free-form reasoning-effort hint (e.g. "low", "high", "max") for agents/harnesses running this task */
+	effort?: string;
 	branch?: string;
 	ordinal?: number;
 	filePath?: string;
@@ -109,6 +113,8 @@ export interface TaskCreateInput {
 	description?: string;
 	status?: TaskStatus;
 	priority?: "high" | "medium" | "low";
+	model?: string;
+	effort?: string;
 	ordinal?: number;
 	milestone?: string;
 	labels?: string[];
@@ -132,6 +138,8 @@ export interface TaskUpdateInput {
 	description?: string;
 	status?: TaskStatus;
 	priority?: "high" | "medium" | "low";
+	model?: string | null;
+	effort?: string | null;
 	milestone?: string | null;
 	labels?: string[];
 	addLabels?: string[];

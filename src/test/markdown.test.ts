@@ -441,6 +441,49 @@ describe("Markdown Serializer", () => {
 			expect(result).toContain("parent_task_id: task-1");
 		});
 
+		it("should round-trip model and effort frontmatter", () => {
+			const task: Task = {
+				id: "task-42",
+				title: "Task with hints",
+				status: "To Do",
+				assignee: [],
+				createdDate: "2025-06-03",
+				labels: [],
+				dependencies: [],
+				model: "opus",
+				effort: "high",
+				description: "Body.",
+			};
+
+			const serialized = serializeTask(task);
+			expect(serialized).toContain("model: opus");
+			expect(serialized).toContain("effort: high");
+
+			const parsed = parseTask(serialized);
+			expect(parsed.model).toBe("opus");
+			expect(parsed.effort).toBe("high");
+		});
+
+		it("should omit model and effort when unset", () => {
+			const task: Task = {
+				id: "task-43",
+				title: "No hints",
+				status: "To Do",
+				assignee: [],
+				createdDate: "2025-06-03",
+				labels: [],
+				dependencies: [],
+			};
+
+			const serialized = serializeTask(task);
+			expect(serialized).not.toContain("model:");
+			expect(serialized).not.toContain("effort:");
+
+			const parsed = parseTask(serialized);
+			expect(parsed.model).toBeUndefined();
+			expect(parsed.effort).toBeUndefined();
+		});
+
 		it("should serialize minimal task", () => {
 			const task: Task = {
 				id: "task-minimal",

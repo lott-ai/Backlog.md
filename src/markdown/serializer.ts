@@ -65,6 +65,8 @@ export function serializeTask(task: Task): string {
 		...(task.parentTaskId && { parent_task_id: task.parentTaskId }),
 		...(task.subtasks && task.subtasks.length > 0 && { subtasks: task.subtasks }),
 		...(task.priority && { priority: task.priority }),
+		...(task.model && { model: task.model }),
+		...(task.effort && { effort: task.effort }),
 		...(task.ordinal !== undefined && { ordinal: task.ordinal }),
 		...(task.onStatusChange && { onStatusChange: task.onStatusChange }),
 	};

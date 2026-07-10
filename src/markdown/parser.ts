@@ -193,6 +193,8 @@ export function parseTask(content: string): Task {
 		parentTaskId: frontmatter.parent_task_id ? String(frontmatter.parent_task_id) : undefined,
 		subtasks: Array.isArray(frontmatter.subtasks) ? frontmatter.subtasks.map(String) : undefined,
 		priority: validatedPriority,
+		model: frontmatter.model ? String(frontmatter.model).trim() || undefined : undefined,
+		effort: frontmatter.effort ? String(frontmatter.effort).trim() || undefined : undefined,
 		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
 		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
 	};

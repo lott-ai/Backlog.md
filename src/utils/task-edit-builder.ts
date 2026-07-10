@@ -44,6 +44,14 @@ export function buildTaskUpdateInput(args: TaskEditArgs): TaskUpdateInput {
 		updateInput.priority = args.priority;
 	}
 
+	if (args.model === null || typeof args.model === "string") {
+		updateInput.model = args.model;
+	}
+
+	if (args.effort === null || typeof args.effort === "string") {
+		updateInput.effort = args.effort;
+	}
+
 	if (args.milestone === null) {
 		updateInput.milestone = null;
 	} else if (typeof args.milestone === "string") {

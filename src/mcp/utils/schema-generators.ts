@@ -55,6 +55,17 @@ export function generateTaskCreateSchema(config: BacklogConfig): JsonSchema {
 				type: "string",
 				enum: ["high", "medium", "low"],
 			},
+			model: {
+				type: "string",
+				maxLength: 100,
+				description: "Optional free-form model hint for agents/harnesses running this task (e.g. opus, sonnet).",
+			},
+			effort: {
+				type: "string",
+				maxLength: 100,
+				description:
+					"Optional free-form reasoning-effort hint for agents/harnesses running this task (e.g. low, high, max).",
+			},
 			ordinal: {
 				type: "number",
 				minimum: 0,
@@ -172,6 +183,17 @@ export function generateTaskEditSchema(config: BacklogConfig): JsonSchema {
 			priority: {
 				type: "string",
 				enum: ["high", "medium", "low"],
+			},
+			model: {
+				type: "string",
+				maxLength: 100,
+				description: "Set free-form model hint for agents (e.g. opus, sonnet). Pass an empty string to clear it.",
+			},
+			effort: {
+				type: "string",
+				maxLength: 100,
+				description:
+					"Set free-form reasoning-effort hint for agents (e.g. low, high, max). Pass an empty string to clear it.",
 			},
 			ordinal: {
 				type: "number",

@@ -3,6 +3,8 @@ export interface TaskEditArgs {
 	description?: string;
 	status?: string;
 	priority?: "high" | "medium" | "low";
+	model?: string | null;
+	effort?: string | null;
 	milestone?: string | null;
 	labels?: string[];
 	addLabels?: string[];

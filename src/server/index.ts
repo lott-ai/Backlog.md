@@ -832,6 +832,8 @@ export class BacklogServer {
 				description: payload.description,
 				status: payload.status,
 				priority: payload.priority,
+				model: payload.model,
+				effort: payload.effort,
 				milestone,
 				labels: payload.labels,
 				assignee: payload.assignee,
@@ -897,6 +899,14 @@ export class BacklogServer {
 
 		if ("priority" in updates && typeof updates.priority === "string") {
 			updateInput.priority = updates.priority;
+		}
+
+		if ("model" in updates && (typeof updates.model === "string" || updates.model === null)) {
+			updateInput.model = updates.model;
+		}
+
+		if ("effort" in updates && (typeof updates.effort === "string" || updates.effort === null)) {
+			updateInput.effort = updates.effort;
 		}
 
 		if ("milestone" in updates && (typeof updates.milestone === "string" || updates.milestone === null)) {

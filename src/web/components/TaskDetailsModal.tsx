@@ -55,6 +55,8 @@ type TaskDetailsFormState = {
   assignee: string[];
   labels: string[];
   priority: string;
+  model: string;
+  effort: string;
   dependencies: string[];
   references: string[];
   milestone: string;
@@ -96,6 +98,8 @@ const buildTaskDetailsFormState = ({
   assignee: task?.assignee || [],
   labels: task?.labels || [],
   priority: task?.priority || "",
+  model: task?.model || "",
+  effort: task?.effort || "",
   dependencies: task?.dependencies || [],
   references: task?.references || [],
   milestone: task?.milestone || "",
@@ -295,6 +299,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [assignee, setAssignee] = useState<string[]>(task?.assignee || []);
   const [labels, setLabels] = useState<string[]>(task?.labels || []);
   const [priority, setPriority] = useState<string>(task?.priority || "");
+  const [model, setModel] = useState<string>(task?.model || "");
+  const [effort, setEffort] = useState<string>(task?.effort || "");
   const [dependencies, setDependencies] = useState<string[]>(task?.dependencies || []);
   const [references, setReferences] = useState<string[]>(task?.references || []);
   const [milestone, setMilestone] = useState<string>(task?.milestone || "");
@@ -407,6 +413,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
         preserveDirtyRefreshValue(current, previousFormState.labels, nextFormState.labels, areJsonEqual),
       );
       setPriority((current) => preserveDirtyRefreshValue(current, previousFormState.priority, nextFormState.priority));
+      setModel((current) => preserveDirtyRefreshValue(current, previousFormState.model, nextFormState.model));
+      setEffort((current) => preserveDirtyRefreshValue(current, previousFormState.effort, nextFormState.effort));
       setDependencies((current) =>
         preserveDirtyRefreshValue(current, previousFormState.dependencies, nextFormState.dependencies, areJsonEqual),
       );
@@ -442,6 +450,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setAssignee(nextFormState.assignee);
     setLabels(nextFormState.labels);
     setPriority(nextFormState.priority);
+    setModel(nextFormState.model);
+    setEffort(nextFormState.effort);
     setDependencies(nextFormState.dependencies);
     setReferences(nextFormState.references);
     setMilestone(nextFormState.milestone);
@@ -601,6 +611,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
         assignee,
         labels,
         priority: (priority === "" ? undefined : priority) as "high" | "medium" | "low" | undefined,
+        model: model.trim().length > 0 ? model.trim() : undefined,
+        effort: effort.trim().length > 0 ? effort.trim() : undefined,
         dependencies,
         milestone: milestone.trim().length > 0 ? milestone.trim() : undefined,
       };
@@ -679,6 +691,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (updates.assignee !== undefined) setAssignee(updates.assignee as string[]);
     if (updates.labels !== undefined) setLabels(updates.labels as string[]);
     if (updates.priority !== undefined) setPriority(String(updates.priority));
+    if (updates.model !== undefined) setModel(String(updates.model ?? ""));
+    if (updates.effort !== undefined) setEffort(String(updates.effort ?? ""));
     if (updates.dependencies !== undefined) setDependencies(updates.dependencies as string[]);
     if (updates.references !== undefined) setReferences(updates.references as string[]);
     if (updates.milestone !== undefined) setMilestone((updates.milestone ?? "") as string);
@@ -1264,6 +1278,40 @@ export const TaskDetailsModal: React.FC<Props> = ({
               <option value="medium">Medium</option>
               <option value="high">High</option>
             </select>
+          </div>
+
+          {/* Model */}
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+            <SectionHeader title="Model" />
+            <input
+              type="text"
+              className={`w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? 'opacity-60 cursor-not-allowed' : ''}`}
+              placeholder="e.g. opus, sonnet"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              onBlur={() => {
+                const next = model.trim();
+                if (next !== (task?.model ?? "")) handleInlineMetaUpdate({ model: next });
+              }}
+              disabled={isFromOtherBranch}
+            />
+          </div>
+
+          {/* Effort */}
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+            <SectionHeader title="Effort" />
+            <input
+              type="text"
+              className={`w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? 'opacity-60 cursor-not-allowed' : ''}`}
+              placeholder="e.g. low, high, max"
+              value={effort}
+              onChange={(e) => setEffort(e.target.value)}
+              onBlur={() => {
+                const next = effort.trim();
+                if (next !== (task?.effort ?? "")) handleInlineMetaUpdate({ effort: next });
+              }}
+              disabled={isFromOtherBranch}
+            />
           </div>
 
           {/* Milestone */}

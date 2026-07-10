@@ -1576,6 +1576,8 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		{ name: "assignee", type: "Assignee list", description: "One or more @names" },
 		{ name: "labels", type: "Comma-separated strings", description: "Task labels" },
 		{ name: "priority", type: choiceType(["high", "medium", "low"]), description: "Task priority" },
+		{ name: "model", type: "Free-form string", description: "Model hint for agents running this task" },
+		{ name: "effort", type: "Free-form string", description: "Reasoning-effort hint for agents running this task" },
 		{ name: "acceptanceCriteria", type: "Markdown list item text", description: "Repeat --ac for multiple criteria" },
 		{ name: "ordinal", type: "Integer", description: "Non-negative manual ordering value" },
 		{ name: "parent", type: "Task ID", description: "Parent task for subtasks" },
@@ -1593,6 +1595,8 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("-s, --status <status>")
 	.option("-l, --labels <labels>")
 	.option("--priority <priority>", "set task priority (high, medium, low)")
+	.option("--model <model>", "set model hint for agents running this task (free-form)")
+	.option("--effort <effort>", "set reasoning-effort hint for agents running this task (free-form)")
 	.option("--plain", "use plain text output after creating")
 	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
 	.option(
@@ -1708,6 +1712,8 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				modifiedFiles: parseDelimitedStringList(options.modifiedFile),
 				parentTaskId: options.parent ? String(options.parent) : undefined,
 				priority: options.priority ? (String(options.priority).toLowerCase() as "high" | "medium" | "low") : undefined,
+				model: options.model ? String(options.model) : undefined,
+				effort: options.effort ? String(options.effort) : undefined,
 				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
 				milestone,
 				implementationPlan: options.plan ? String(options.plan) : undefined,
@@ -2407,6 +2413,8 @@ addHelpSchema(taskCmd.command("edit [taskId]"), {
 			type: "Boolean",
 			description: "Remove all labels; cannot combine with other label flags",
 		},
+		{ name: "model", type: "Free-form string", description: "Model hint for agents; empty string clears" },
+		{ name: "effort", type: "Free-form string", description: "Reasoning-effort hint for agents; empty string clears" },
 		{ name: "plan", type: "Markdown", description: "Replacement implementation plan" },
 		{ name: "notes", type: "Markdown", description: "Replacement implementation notes" },
 		{ name: "comment", type: "Markdown", description: "Append a discussion comment" },
@@ -2432,6 +2440,11 @@ addHelpSchema(taskCmd.command("edit [taskId]"), {
 		createMultiValueAccumulator(),
 	)
 	.option("--priority <priority>", "set task priority (high, medium, low)")
+	.option("--model <model>", "set model hint for agents running this task (free-form; empty string clears)")
+	.option(
+		"--effort <effort>",
+		"set reasoning-effort hint for agents running this task (free-form; empty string clears)",
+	)
 	.option("--ordinal <number>", "set task ordinal for custom ordering")
 	.option("-m, --milestone <milestone>", "assign task to milestone by ID or title")
 	.option("--clear-milestone", "clear task milestone assignment")
@@ -2730,6 +2743,12 @@ addHelpSchema(taskCmd.command("edit [taskId]"), {
 		}
 		if (normalizedPriority) {
 			editArgs.priority = normalizedPriority;
+		}
+		if (options.model !== undefined) {
+			editArgs.model = String(options.model);
+		}
+		if (options.effort !== undefined) {
+			editArgs.effort = String(options.effort);
 		}
 		if (ordinalValue !== undefined) {
 			editArgs.ordinal = ordinalValue;
