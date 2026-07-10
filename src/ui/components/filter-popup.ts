@@ -218,6 +218,7 @@ export async function openMultiSelectFilterPopup(options: {
 	items: string[];
 	selectedItems: string[];
 	helpText?: string;
+	onSelectionChange?: (selected: string[]) => void;
 }): Promise<string[] | null> {
 	if (options.items.length === 0) {
 		return [];
@@ -272,6 +273,9 @@ export async function openMultiSelectFilterPopup(options: {
 			onSelect: (selected) => {
 				const chosen = Array.isArray(selected) ? selected.map((item) => item.id) : [];
 				finish(chosen);
+			},
+			onSelectionChange: (selected) => {
+				options.onSelectionChange?.(selected.map((item) => item.id));
 			},
 		});
 

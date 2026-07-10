@@ -660,6 +660,47 @@ export async function renderBoardTui(
 			if (filterPopupOpen || modalOpen || moveOp || !filterHeader) {
 				return;
 			}
+			const openingFilters = {
+				priority: [...sharedFilters.priorityFilter],
+				labels: [...sharedFilters.labelFilter],
+				milestone: [...sharedFilters.milestoneFilter],
+				labelMatch: sharedFilters.labelMatch,
+				selectedTaskId: getSelectedTaskId(),
+			};
+			const applyPickerSelection = (selected: string[]) => {
+				switch (filterId) {
+					case "labels":
+						sharedFilters.labelFilter = [...selected];
+						sharedFilters.labelMatch = "any";
+						filterHeader?.setFilters({ labels: sharedFilters.labelFilter });
+						break;
+					case "priority":
+						sharedFilters.priorityFilter = [...selected];
+						filterHeader?.setFilters({ priority: sharedFilters.priorityFilter });
+						break;
+					case "milestone":
+						sharedFilters.milestoneFilter = milestonePickerLabelsToValues(selected, milestoneEntities);
+						filterHeader?.setFilters({ milestone: sharedFilters.milestoneFilter });
+						break;
+				}
+				emitFilterChange();
+				renderView(openingFilters.selectedTaskId);
+			};
+			const restoreOpeningFilters = () => {
+				sharedFilters.priorityFilter = [...openingFilters.priority];
+				sharedFilters.labelFilter = [...openingFilters.labels];
+				sharedFilters.milestoneFilter = [...openingFilters.milestone];
+				sharedFilters.labelMatch = openingFilters.labelMatch;
+				filterHeader?.setFilters({
+					priority: sharedFilters.priorityFilter,
+					labels: sharedFilters.labelFilter,
+					milestone: sharedFilters.milestoneFilter,
+				});
+				emitFilterChange();
+				renderView(openingFilters.selectedTaskId);
+			};
+
+			focusFilterControl(filterId);
 			filterPopupOpen = true;
 			try {
 				if (filterId === "labels") {
@@ -668,13 +709,10 @@ export async function renderBoardTui(
 						title: "Label Filter",
 						items: [...configuredLabels].sort((a, b) => a.localeCompare(b)),
 						selectedItems: sharedFilters.labelFilter,
+						onSelectionChange: applyPickerSelection,
 					});
-					if (nextLabels !== null) {
-						sharedFilters.labelFilter = nextLabels;
-						sharedFilters.labelMatch = "any";
-						filterHeader.setFilters({ labels: nextLabels });
-						emitFilterChange();
-						renderView();
+					if (nextLabels === null) {
+						restoreOpeningFilters();
 					}
 					return;
 				}
@@ -686,12 +724,10 @@ export async function renderBoardTui(
 						title: "Priority Filter",
 						items: priorities,
 						selectedItems: sharedFilters.priorityFilter,
+						onSelectionChange: applyPickerSelection,
 					});
-					if (nextPriorities !== null) {
-						sharedFilters.priorityFilter = nextPriorities;
-						filterHeader.setFilters({ priority: nextPriorities });
-						emitFilterChange();
-						renderView();
+					if (nextPriorities === null) {
+						restoreOpeningFilters();
 					}
 					return;
 				}
@@ -702,12 +738,10 @@ export async function renderBoardTui(
 					title: "Milestone Filter",
 					items: milestonePickerItems,
 					selectedItems: milestoneValuesToPickerLabels(sharedFilters.milestoneFilter, milestoneEntities),
+					onSelectionChange: applyPickerSelection,
 				});
-				if (nextMilestones !== null) {
-					sharedFilters.milestoneFilter = milestonePickerLabelsToValues(nextMilestones, milestoneEntities);
-					filterHeader.setFilters({ milestone: sharedFilters.milestoneFilter });
-					emitFilterChange();
-					renderView();
+				if (nextMilestones === null) {
+					restoreOpeningFilters();
 				}
 			} finally {
 				filterPopupOpen = false;
@@ -818,11 +852,11 @@ export async function renderBoardTui(
 			}, durationMs);
 		};
 
-		const renderView = () => {
+		const renderView = (preferredTaskId?: string) => {
 			const projectedData = getProjectedColumns(getFilteredTasks(), moveOp);
 
 			// If we are moving, we want to select the moving task
-			const selectedId = moveOp ? moveOp.taskId : getSelectedTaskId();
+			const selectedId = moveOp ? moveOp.taskId : (preferredTaskId ?? getSelectedTaskId());
 
 			if (projectedData.length === 0) {
 				const fallbackStatus = currentStatuses[0] ?? "No Status";

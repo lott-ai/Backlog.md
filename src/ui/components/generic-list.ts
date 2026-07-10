@@ -25,6 +25,7 @@ export interface GenericListOptions<T extends GenericListItem> {
 	selectedIndex?: number;
 	selectedIndices?: number[];
 	onSelect?: (selected: T | T[], index?: number | number[]) => void;
+	onSelectionChange?: (selected: T[], indices: number[]) => void;
 	// Called whenever the highlighted item changes (live navigation)
 	onHighlight?: (selected: T | null, index: number) => void;
 	// Called before wrapping at list boundaries. Return true to consume navigation.
@@ -72,6 +73,7 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 	private selectedIndices: Set<number>;
 	private isMultiSelect: boolean;
 	private onSelect?: (selected: T | T[], index?: number | number[]) => void;
+	private onSelectionChange?: (selected: T[], indices: number[]) => void;
 	private onHighlight?: (selected: T | null, index: number) => void;
 	private itemRenderer: (item: T, index: number, selected: boolean) => string;
 	private groupBy?: (item: T) => string;
@@ -93,6 +95,7 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 		this.selectedIndex = options.selectedIndex || 0;
 		this.selectedIndices = new Set(options.selectedIndices || []);
 		this.onSelect = options.onSelect;
+		this.onSelectionChange = options.onSelectionChange;
 		this.onHighlight = options.onHighlight;
 		this.groupBy = options.groupBy;
 
@@ -408,6 +411,7 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 	}
 
 	private toggleSelection(index: number): void {
+		if (!this.filteredItems[index]) return;
 		if (this.selectedIndices.has(index)) {
 			this.selectedIndices.delete(index);
 		} else {
@@ -422,15 +426,23 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 			this.setDisplayContent(index, index === this.selectedIndex);
 			this.getScreen()?.render?.();
 		}
+		const { selected, indices } = this.getMultiSelection();
+		this.onSelectionChange?.([...selected], [...indices]);
 	}
 
 	private confirmSelection(): void {
-		const selected = Array.from(this.selectedIndices)
-			.map((i) => this.filteredItems[i])
-			.filter((item): item is T => Boolean(item));
-
-		const indices = Array.from(this.selectedIndices);
+		const { selected, indices } = this.getMultiSelection();
 		this.onSelect?.(selected, indices);
+	}
+
+	private getMultiSelection(): { selected: T[]; indices: number[] } {
+		const indices = Array.from(this.selectedIndices)
+			.filter((index) => Boolean(this.filteredItems[index]))
+			.sort((left, right) => left - right);
+		return {
+			selected: indices.map((index) => this.filteredItems[index]).filter((item): item is T => Boolean(item)),
+			indices,
+		};
 	}
 
 	private triggerSelection(): void {

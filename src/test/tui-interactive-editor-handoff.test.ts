@@ -5,27 +5,9 @@ import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
 import type { BacklogConfig, Task } from "../types/index.ts";
 import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { getInteractiveTuiSkipReason, runInteractiveTuiScenario } from "./tui-interactive-test-utils.ts";
 
-const CLI_PATH = process.env.TUI_TEST_CLI_PATH?.trim() || join(process.cwd(), "src", "cli.ts");
-const CLI_RUNTIME = process.env.TUI_TEST_CLI_RUNTIME?.trim() ?? "bun";
-const TRANSCRIPT_DIR = join(process.cwd(), "tmp", "tui-interactive-transcripts");
-const EXPECT_PATH = Bun.which("expect");
-const RUN_INTERACTIVE_TUI_TESTS = process.env.RUN_INTERACTIVE_TUI_TESTS === "1";
-
-function getSkipReason(): string | null {
-	if (process.platform === "win32") {
-		return "interactive PTY tests require a Unix-like environment";
-	}
-	if (!RUN_INTERACTIVE_TUI_TESTS) {
-		return "set RUN_INTERACTIVE_TUI_TESTS=1 to enable interactive PTY tests";
-	}
-	if (!EXPECT_PATH) {
-		return "expect is not installed";
-	}
-	return null;
-}
-
-const skipReason = getSkipReason();
+const skipReason = getInteractiveTuiSkipReason();
 if (skipReason) {
 	console.warn(`[tui-interactive] Skipping interactive editor handoff tests: ${skipReason}`);
 }
@@ -45,24 +27,12 @@ interface InteractiveEditRunResult {
 	editorInputLog: string;
 }
 
-function buildSpawnCommand(cliArgs: string[]): string {
-	const argsSegment = cliArgs.map((arg) => `"${arg}"`).join(" ");
-	if (CLI_RUNTIME.length === 0) {
-		return `spawn {${CLI_PATH}} ${argsSegment}`;
-	}
-	return `spawn {${CLI_RUNTIME}} {${CLI_PATH}} ${argsSegment}`;
-}
-
 async function runInteractiveEditScenario(options: InteractiveEditRunOptions): Promise<InteractiveEditRunResult> {
 	const testDir = createUniqueTestDir(`test-tui-interactive-${options.scenario}`);
 	await mkdir(testDir, { recursive: true });
-	await mkdir(TRANSCRIPT_DIR, { recursive: true });
-
-	const transcriptPath = join(TRANSCRIPT_DIR, `${options.scenario}-${Date.now()}.log`);
 	const editorMarkerPath = join(testDir, `${options.scenario}-editor-marker.txt`);
 	const editorInputPath = join(testDir, `${options.scenario}-editor-input.log`);
 	const editorScriptPath = join(testDir, `${options.scenario}-editor.cjs`);
-	const expectScriptPath = join(testDir, `${options.scenario}.expect`);
 
 	await writeFile(
 		editorScriptPath,
@@ -136,9 +106,10 @@ setTimeout(() => {
 	};
 	await core.createTask(task, false);
 
-	await writeFile(
-		expectScriptPath,
-		`#!/usr/bin/expect -f
+	const runResult = await runInteractiveTuiScenario({
+		scenario: options.scenario,
+		cwd: testDir,
+		buildExpectScript: ({ transcriptPath, spawnCommand }) => `#!/usr/bin/expect -f
 set timeout 20
 log_user 0
 log_file -a {${transcriptPath}}
@@ -149,7 +120,7 @@ set env(NO_COLOR) {1}
 set env(EDITOR) {node ${editorScriptPath}}
 set env(TUI_EDITOR_MARKER_FILE) {${editorMarkerPath}}
 set env(TUI_EDITOR_KEY_LOG_FILE) {${editorInputPath}}
-${buildSpawnCommand(options.cliArgs)}
+${spawnCommand(options.cliArgs)}
 expect {
 	-re {${options.readyPattern}} {}
 	timeout { exit 91 }
@@ -172,31 +143,18 @@ set wait_status [wait]
 set exit_code [lindex $wait_status 3]
 exit $exit_code
 `,
-	);
-
-	const child = Bun.spawn(["expect", "-f", expectScriptPath], {
-		cwd: testDir,
-		stdout: "pipe",
-		stderr: "pipe",
 	});
-	const stdoutPromise = child.stdout ? new Response(child.stdout).text() : Promise.resolve("");
-	const stderrPromise = child.stderr ? new Response(child.stderr).text() : Promise.resolve("");
-	const exitCode = await child.exited;
-	const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-	const transcript = await Bun.file(transcriptPath)
-		.text()
-		.catch(() => "(no transcript captured)");
 
 	try {
-		expect([0, 130]).toContain(exitCode);
+		expect([0, 130]).toContain(runResult.exitCode);
 	} catch (_error) {
 		throw new Error(
 			`Interactive CLI run failed for ${options.scenario}.\n` +
-				`Exit code: ${exitCode}\n` +
-				`STDOUT:\n${stdout}\n` +
-				`STDERR:\n${stderr}\n` +
-				`Transcript: ${transcriptPath}\n` +
-				`Transcript contents:\n${transcript}\n`,
+				`Exit code: ${runResult.exitCode}\n` +
+				`STDOUT:\n${runResult.stdout}\n` +
+				`STDERR:\n${runResult.stderr}\n` +
+				`Transcript: ${runResult.transcriptPath}\n` +
+				`Transcript contents:\n${runResult.transcript}\n`,
 		);
 	}
 
@@ -207,7 +165,7 @@ exit $exit_code
 	await safeCleanup(testDir);
 	return {
 		taskContent: taskContent || "",
-		transcriptPath,
+		transcriptPath: runResult.transcriptPath,
 		editorMarker: markerContent,
 		editorInputLog,
 	};

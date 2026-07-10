@@ -26,6 +26,55 @@ function withTtyScreen(run: (screen: ScreenInterface) => void): void {
 }
 
 describe("GenericList selection rendering", () => {
+	it("reports each multi-select toggle in picker order without confirming or cancelling", () => {
+		withTtyScreen((screen) => {
+			const changes: Array<{ selected: string[]; indices: number[] }> = [];
+			const confirmations: string[][] = [];
+			const list = new GenericList({
+				parent: screen,
+				items: [{ id: "TASK-1" }, { id: "TASK-2" }, { id: "TASK-3" }],
+				multiSelect: true,
+				selectedIndices: [2],
+				showHelp: false,
+				onSelectionChange: (selected, indices) => {
+					changes.push({
+						selected: selected.map((item) => item.id),
+						indices: [...indices],
+					});
+				},
+				onSelect: (selected) => {
+					confirmations.push(Array.isArray(selected) ? selected.map((item) => item.id) : []);
+				},
+			});
+
+			const listBox = list.getListBox() as RenderedList;
+			listBox.emit("key down", "", { name: "down" });
+			expect(changes).toEqual([]);
+
+			listBox.emit("key space", " ", { name: "space" });
+			expect(changes).toEqual([{ selected: ["TASK-2", "TASK-3"], indices: [1, 2] }]);
+			expect(confirmations).toEqual([]);
+
+			listBox.emit("key space", " ", { name: "space" });
+			expect(changes.at(-1)).toEqual({ selected: ["TASK-3"], indices: [2] });
+
+			listBox.emit("key down", "", { name: "down" });
+			listBox.emit("key space", " ", { name: "space" });
+			expect(changes.at(-1)).toEqual({ selected: [], indices: [] });
+			expect(changes).toHaveLength(3);
+
+			listBox.emit("key enter", "", { name: "enter" });
+			expect(confirmations).toEqual([[]]);
+			expect(changes).toHaveLength(3);
+
+			listBox.emit("key escape", "", { name: "escape" });
+			expect(confirmations).toEqual([[], []]);
+			expect(changes).toHaveLength(3);
+
+			list.destroy();
+		});
+	});
+
 	it("syncs highlighted content when the blessed list selection changes", () => {
 		withTtyScreen((screen) => {
 			const highlighted: number[] = [];
