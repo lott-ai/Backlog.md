@@ -18,7 +18,7 @@ export function buildMilestonePickerLabels(milestones: Milestone[]): string[] {
 	return milestones
 		.filter((milestone) => milestone.id.trim() && milestone.title.trim())
 		.map((milestone) => formatMilestonePickerLabel(milestone))
-		.sort((left, right) => left.localeCompare(right));
+		.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
 
 function findMilestoneForFilterValue(value: string, milestones: Milestone[]): Milestone | undefined {
@@ -59,7 +59,7 @@ export function buildAvailableMilestonePickerLabels(
 		coveredLabels.add(key);
 	}
 
-	return labels.sort((left, right) => left.localeCompare(right));
+	return labels.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
 
 export function milestoneValuesToPickerLabels(values: string[], milestones: Milestone[] = []): string[] {
