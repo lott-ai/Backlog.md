@@ -374,22 +374,34 @@ export class ApiClient {
 	async getCleanupPreview(age: number): Promise<{
 		count: number;
 		tasks: Array<{ id: string; title: string; updatedDate?: string; createdDate: string }>;
+		milestoneCount: number;
+		milestones: Array<{ id: string; title: string; completedAt: string; taskCount: number }>;
 	}> {
 		return this.fetchJson<{
 			count: number;
 			tasks: Array<{ id: string; title: string; updatedDate?: string; createdDate: string }>;
+			milestoneCount: number;
+			milestones: Array<{ id: string; title: string; completedAt: string; taskCount: number }>;
 		}>(`${API_BASE}/tasks/cleanup?age=${age}`);
 	}
 
-	async executeCleanup(
-		age: number,
-	): Promise<{ success: boolean; movedCount: number; totalCount: number; message: string; failedTasks?: string[] }> {
+	async executeCleanup(age: number): Promise<{
+		success: boolean;
+		movedCount: number;
+		totalCount: number;
+		message: string;
+		failedTasks?: string[];
+		archivedMilestoneCount?: number;
+		failedMilestones?: string[];
+	}> {
 		return this.fetchJson<{
 			success: boolean;
 			movedCount: number;
 			totalCount: number;
 			message: string;
 			failedTasks?: string[];
+			archivedMilestoneCount?: number;
+			failedMilestones?: string[];
 		}>(`${API_BASE}/tasks/cleanup/execute`, {
 			method: "POST",
 			body: JSON.stringify({ age }),

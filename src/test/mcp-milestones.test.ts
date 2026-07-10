@@ -1027,4 +1027,41 @@ Milestone: Legacy frontmatter ID
 		expect(text).toContain("Archived milestone values still on tasks (1):");
 		expect(text).toContain("- m-0");
 	});
+
+	it("milestone_cleanup dry-runs and archives completed milestones by age", async () => {
+		await server.testInterface.callTool({
+			params: { name: "milestone_add", arguments: { name: "Cleanup Target" } },
+		});
+
+		const oldDate = new Date();
+		oldDate.setDate(oldDate.getDate() - 20);
+		const oldDateValue = oldDate.toISOString().split("T")[0] as string;
+
+		await server.createTask({
+			id: "task-1",
+			title: "Done task",
+			status: "Done",
+			assignee: [],
+			labels: [],
+			dependencies: [],
+			createdDate: oldDateValue,
+			updatedDate: oldDateValue,
+			milestone: "m-0",
+			rawContent: "",
+		});
+
+		const dryRun = await server.testInterface.callTool({
+			params: { name: "milestone_cleanup", arguments: { ageDays: 7, dryRun: true } },
+		});
+		expect(getText(dryRun.content)).toContain("Dry run:");
+		expect(getText(dryRun.content)).toContain("Cleanup Target");
+		expect((await server.filesystem.listMilestones()).some((m) => m.title === "Cleanup Target")).toBe(true);
+
+		const execute = await server.testInterface.callTool({
+			params: { name: "milestone_cleanup", arguments: { ageDays: 7, dryRun: false } },
+		});
+		expect(getText(execute.content)).toContain("Archived 1 of 1");
+		expect((await server.filesystem.listMilestones()).some((m) => m.title === "Cleanup Target")).toBe(false);
+		expect((await server.filesystem.listArchivedMilestones()).some((m) => m.title === "Cleanup Target")).toBe(true);
+	});
 });

@@ -1,6 +1,14 @@
 import type { Milestone, MilestoneBucket, MilestoneSummary, Task } from "../types/index.ts";
+import { isTerminalStatus } from "../utils/terminal-status.ts";
 
 const NO_MILESTONE_KEY = "__none";
+
+export interface CompletedMilestoneCandidate {
+	milestone: Milestone;
+	completedAt: string;
+	taskCount: number;
+	tasks: Task[];
+}
 
 /**
  * Normalize a milestone name/ID by trimming whitespace
@@ -258,11 +266,108 @@ export function getMilestoneLabel(milestoneId: string | undefined, milestoneEnti
 }
 
 /**
- * Check if a status represents a "done" state
+ * Check if a status represents a "done" state (substring fallback for display).
+ * Prefer isTerminalStatus with project statuses for completion/eligibility decisions.
  */
 export function isDoneStatus(status?: string | null): boolean {
 	const normalized = (status ?? "").toLowerCase();
 	return normalized.includes("done") || normalized.includes("complete");
+}
+
+/**
+ * Prefer terminal status when statuses are known; fall back to substring done detection.
+ */
+export function isCompletedTaskStatus(status: string | null | undefined, statuses: readonly string[]): boolean {
+	if (statuses.length > 0) {
+		return isTerminalStatus(status, statuses);
+	}
+	return isDoneStatus(status);
+}
+
+/**
+ * Activity date used for age-based cleanup (updatedDate, else createdDate).
+ */
+export function getTaskActivityDate(task: Pick<Task, "updatedDate" | "createdDate">): string | undefined {
+	return task.updatedDate || task.createdDate || undefined;
+}
+
+/**
+ * Max activity date across tasks, or undefined if none have dates.
+ */
+export function getLatestTaskActivityDate(tasks: Array<Pick<Task, "updatedDate" | "createdDate">>): string | undefined {
+	let latest: string | undefined;
+	let latestMs = Number.NEGATIVE_INFINITY;
+	for (const task of tasks) {
+		const dateStr = getTaskActivityDate(task);
+		if (!dateStr) continue;
+		const ms = new Date(dateStr).getTime();
+		if (Number.isNaN(ms)) continue;
+		if (ms >= latestMs) {
+			latestMs = ms;
+			latest = dateStr;
+		}
+	}
+	return latest;
+}
+
+/**
+ * True when a milestone has at least one task and every task is terminal/completed.
+ */
+export function isMilestoneFullyCompleted(tasks: Array<Pick<Task, "status">>, statuses: readonly string[]): boolean {
+	if (tasks.length === 0) {
+		return false;
+	}
+	return tasks.every((task) => isCompletedTaskStatus(task.status, statuses));
+}
+
+/**
+ * Active milestones that are fully completed and whose latest task activity is older than olderThanDays.
+ */
+export function getCompletedMilestonesOlderThan(
+	milestones: Milestone[],
+	tasks: Task[],
+	statuses: string[],
+	olderThanDays: number,
+	now: Date = new Date(),
+): CompletedMilestoneCandidate[] {
+	if (olderThanDays < 0 || !Number.isFinite(olderThanDays)) {
+		return [];
+	}
+
+	const canonicalTasks = canonicalizeTaskMilestones(tasks, milestones, []);
+	const cutoffDate = new Date(now);
+	cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+
+	const candidates: CompletedMilestoneCandidate[] = [];
+
+	for (const milestone of milestones) {
+		const bucketKey = milestoneKey(milestone.id);
+		if (!bucketKey) continue;
+
+		const milestoneTasks = canonicalTasks.filter((task) => milestoneKey(task.milestone) === bucketKey);
+		if (!isMilestoneFullyCompleted(milestoneTasks, statuses)) {
+			continue;
+		}
+
+		const completedAt = getLatestTaskActivityDate(milestoneTasks);
+		if (!completedAt) {
+			continue;
+		}
+
+		const completedDate = new Date(completedAt);
+		if (Number.isNaN(completedDate.getTime()) || completedDate >= cutoffDate) {
+			continue;
+		}
+
+		candidates.push({
+			milestone,
+			completedAt,
+			taskCount: milestoneTasks.length,
+			tasks: milestoneTasks,
+		});
+	}
+
+	return candidates;
 }
 
 /**
@@ -290,9 +395,9 @@ function createBucket(
 		counts[status] = (counts[status] ?? 0) + 1;
 	}
 
-	const doneCount = bucketTasks.filter((t) => isDoneStatus(t.status)).length;
+	const doneCount = bucketTasks.filter((t) => isCompletedTaskStatus(t.status, statuses)).length;
 	const progress = bucketTasks.length > 0 ? Math.round((doneCount / bucketTasks.length) * 100) : 0;
-	const isCompleted = bucketTasks.length > 0 && doneCount === bucketTasks.length;
+	const isCompleted = !isNoMilestone && isMilestoneFullyCompleted(bucketTasks, statuses);
 
 	const key = bucketMilestoneKey ? bucketMilestoneKey : NO_MILESTONE_KEY;
 	const label = getMilestoneLabel(milestoneId, milestoneEntities);

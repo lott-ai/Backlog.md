@@ -61,6 +61,7 @@ import { upsertTaskUpdatedDate } from "../utils/task-updated-date.ts";
 import { isTerminalStatus } from "../utils/terminal-status.ts";
 import { migrateConfig, needsMigration } from "./config-migration.ts";
 import { ContentStore } from "./content-store.ts";
+import { type CompletedMilestoneCandidate, getCompletedMilestonesOlderThan } from "./milestones.ts";
 import { migrateDraftPrefixes, needsDraftPrefixMigration } from "./prefix-migration.ts";
 import { calculateNewOrdinal, DEFAULT_ORDINAL_STEP, resolveOrdinalConflicts } from "./reorder.ts";
 import { SearchService } from "./search-service.ts";
@@ -2368,6 +2369,38 @@ export class Core {
 			const date = new Date(taskDate);
 			return date < cutoffDate;
 		});
+	}
+
+	async getCompletedMilestonesByAge(olderThanDays: number): Promise<CompletedMilestoneCandidate[]> {
+		const [milestones, tasks, config] = await Promise.all([
+			this.fs.listMilestones(),
+			this.fs.listTasks(),
+			this.fs.loadConfig(),
+		]);
+		const statuses = config?.statuses ?? [...DEFAULT_STATUSES];
+		return getCompletedMilestonesOlderThan(milestones, tasks, statuses, olderThanDays);
+	}
+
+	async archiveCompletedMilestonesByAge(
+		olderThanDays: number,
+		autoCommit?: boolean,
+	): Promise<{ archived: Milestone[]; failed: string[] }> {
+		const candidates = await this.getCompletedMilestonesByAge(olderThanDays);
+		const archived: Milestone[] = [];
+		const failed: string[] = [];
+
+		for (const candidate of candidates) {
+			const result = await this.archiveMilestone(candidate.milestone.id, autoCommit);
+			if (result.success && result.milestone) {
+				archived.push(result.milestone);
+			} else if (result.success) {
+				archived.push(candidate.milestone);
+			} else {
+				failed.push(candidate.milestone.id);
+			}
+		}
+
+		return { archived, failed };
 	}
 
 	async archiveDraft(draftId: string, autoCommit?: boolean): Promise<boolean> {

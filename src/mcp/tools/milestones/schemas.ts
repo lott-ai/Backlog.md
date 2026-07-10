@@ -89,3 +89,21 @@ export const milestoneArchiveSchema: JsonSchema = {
 	required: ["name"],
 	additionalProperties: false,
 };
+
+export const milestoneCleanupSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		ageDays: {
+			type: "number",
+			minimum: 0,
+			description: "Archive fully completed milestones whose latest task activity is older than this many days",
+		},
+		dryRun: {
+			type: "boolean",
+			default: true,
+			description: "When true (default), only list eligible milestones. When false, archive them.",
+		},
+	},
+	required: ["ageDays"],
+	additionalProperties: false,
+};

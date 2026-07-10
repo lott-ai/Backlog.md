@@ -1,11 +1,18 @@
 import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
-import type { MilestoneAddArgs, MilestoneArchiveArgs, MilestoneRemoveArgs, MilestoneRenameArgs } from "./handlers.ts";
+import type {
+	MilestoneAddArgs,
+	MilestoneArchiveArgs,
+	MilestoneCleanupArgs,
+	MilestoneRemoveArgs,
+	MilestoneRenameArgs,
+} from "./handlers.ts";
 import { MilestoneHandlers } from "./handlers.ts";
 import {
 	milestoneAddSchema,
 	milestoneArchiveSchema,
+	milestoneCleanupSchema,
 	milestoneListSchema,
 	milestoneRemoveSchema,
 	milestoneRenameSchema,
@@ -69,9 +76,22 @@ export function registerMilestoneTools(server: McpServer): void {
 		async (input) => handlers.archiveMilestone(input as MilestoneArchiveArgs),
 	);
 
+	const cleanupTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "milestone_cleanup",
+			description:
+				"Preview or archive fully completed milestones older than a given age in days (dryRun defaults to true)",
+			inputSchema: milestoneCleanupSchema,
+			annotations: { title: "Cleanup Completed Milestones", destructiveHint: true },
+		},
+		milestoneCleanupSchema,
+		async (input) => handlers.cleanupMilestones(input as MilestoneCleanupArgs),
+	);
+
 	server.addTool(listTool);
 	server.addTool(addTool);
 	server.addTool(renameTool);
 	server.addTool(removeTool);
 	server.addTool(archiveTool);
+	server.addTool(cleanupTool);
 }

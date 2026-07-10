@@ -32,6 +32,11 @@ export type MilestoneArchiveArgs = {
 	name: string;
 };
 
+export type MilestoneCleanupArgs = {
+	ageDays: number;
+	dryRun?: boolean;
+};
+
 function collectArchivedMilestoneKeys(archivedMilestones: Milestone[], activeMilestones: Milestone[]): string[] {
 	const keys = new Set<string>();
 	const activeTitleKeys = new Set(activeMilestones.map((milestone) => milestoneKey(milestone.title)).filter(Boolean));
@@ -663,6 +668,69 @@ export class MilestoneHandlers {
 				{
 					type: "text",
 					text: `Archived milestone "${label}"${id ? ` (${id})` : ""}.`,
+				},
+			],
+		};
+	}
+
+	async cleanupMilestones(args: MilestoneCleanupArgs): Promise<CallToolResult> {
+		const ageDays = args.ageDays;
+		if (typeof ageDays !== "number" || Number.isNaN(ageDays) || ageDays < 0) {
+			throw new BacklogToolError("ageDays must be a non-negative number.", "VALIDATION_ERROR");
+		}
+
+		const dryRun = args.dryRun !== false;
+		const candidates = await this.core.getCompletedMilestonesByAge(ageDays);
+
+		if (candidates.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: dryRun
+							? `No completed milestones older than ${ageDays} day(s).`
+							: `No completed milestones older than ${ageDays} day(s) to archive.`,
+					},
+				],
+			};
+		}
+
+		const previewLines = candidates.map(
+			(candidate) =>
+				`- ${candidate.milestone.id}: ${candidate.milestone.title} (completed since ${candidate.completedAt}, ${candidate.taskCount} task${candidate.taskCount === 1 ? "" : "s"})`,
+		);
+
+		if (dryRun) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: [
+							`Dry run: ${candidates.length} completed milestone(s) older than ${ageDays} day(s):`,
+							...previewLines,
+							"",
+							"Re-run with dryRun=false to archive these milestones.",
+						].join("\n"),
+					},
+				],
+			};
+		}
+
+		const result = await this.core.archiveCompletedMilestonesByAge(ageDays, false);
+		const archivedLines = result.archived.map((milestone) => `- ${milestone.id}: ${milestone.title}`);
+		const lines = [
+			`Archived ${result.archived.length} of ${candidates.length} completed milestone(s) older than ${ageDays} day(s).`,
+			...(archivedLines.length > 0 ? ["", "Archived:", ...archivedLines] : []),
+		];
+		if (result.failed.length > 0) {
+			lines.push("", "Failed:", ...result.failed.map((id) => `- ${id}`));
+		}
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: lines.join("\n"),
 				},
 			],
 		};

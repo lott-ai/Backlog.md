@@ -303,6 +303,88 @@ describe("Cleanup functionality", () => {
 		});
 	});
 
+	describe("completed milestone cleanup by age", () => {
+		it("finds and archives fully completed milestones older than threshold", async () => {
+			const oldDate = new Date();
+			oldDate.setDate(oldDate.getDate() - 10);
+			const recentDate = new Date();
+			recentDate.setDate(recentDate.getDate() - 1);
+			const oldDateValue = oldDate.toISOString().split("T")[0] as string;
+			const recentDateValue = recentDate.toISOString().split("T")[0] as string;
+
+			const oldMilestone = await core.filesystem.createMilestone("Old Complete");
+			const recentMilestone = await core.filesystem.createMilestone("Recent Complete");
+			const incompleteMilestone = await core.filesystem.createMilestone("Still Open");
+
+			await core.createTask(
+				{
+					...sampleTask,
+					id: "task-10",
+					title: "Old MS task",
+					status: "Done",
+					milestone: oldMilestone.id,
+					createdDate: oldDateValue,
+					updatedDate: oldDateValue,
+				},
+				false,
+			);
+			await core.createTask(
+				{
+					...sampleTask,
+					id: "task-11",
+					title: "Recent MS task",
+					status: "Done",
+					milestone: recentMilestone.id,
+					createdDate: recentDateValue,
+					updatedDate: recentDateValue,
+				},
+				false,
+			);
+			await core.createTask(
+				{
+					...sampleTask,
+					id: "task-12",
+					title: "Open MS task",
+					status: "In Progress",
+					milestone: incompleteMilestone.id,
+					createdDate: oldDateValue,
+					updatedDate: oldDateValue,
+				},
+				false,
+			);
+
+			const candidates = await core.getCompletedMilestonesByAge(3);
+			expect(candidates.map((c) => c.milestone.id)).toEqual([oldMilestone.id]);
+
+			const result = await core.archiveCompletedMilestonesByAge(3, false);
+			expect(result.archived.map((m) => m.id)).toEqual([oldMilestone.id]);
+			expect(result.failed).toEqual([]);
+
+			const active = await core.filesystem.listMilestones();
+			expect(active.map((m) => m.id).sort()).toEqual([incompleteMilestone.id, recentMilestone.id].sort());
+			const archived = await core.filesystem.listArchivedMilestones();
+			expect(archived.some((m) => m.id === oldMilestone.id)).toBe(true);
+		});
+
+		it("persists and loads milestoneAutoArchiveDays config", async () => {
+			const config = await core.filesystem.loadConfig();
+			if (!config) {
+				throw new Error("Expected config");
+			}
+			await core.filesystem.saveConfig({
+				...config,
+				milestoneAutoArchiveDays: 14,
+			});
+			const loaded = await core.filesystem.loadConfig();
+			expect(loaded?.milestoneAutoArchiveDays).toBe(14);
+
+			// Round-trip through a fresh filesystem instance
+			const reloaded = new Core(TEST_DIR);
+			const fromDisk = await reloaded.filesystem.loadConfig();
+			expect(fromDisk?.milestoneAutoArchiveDays).toBe(14);
+		});
+	});
+
 	describe("Error handling", () => {
 		it("should handle non-existent task gracefully", async () => {
 			const success = await core.completeTask("non-existent", false);

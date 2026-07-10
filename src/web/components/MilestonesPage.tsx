@@ -4,7 +4,15 @@ import Fuse from "fuse.js";
 import { apiClient, taskProjectKey } from "../lib/api";
 import { useProjectFilter } from "../contexts/ProjectFilterContext";
 import type { ProjectRef } from "../../types";
-import { buildMilestoneBuckets, collectArchivedMilestoneKeys, isDoneStatus, milestoneKey } from "../utils/milestones";
+import {
+	buildMilestoneBuckets,
+	collectArchivedMilestoneKeys,
+	getLatestTaskActivityDate,
+	isCompletedTaskStatus,
+	isDoneStatus,
+	isMilestoneFullyCompleted,
+	milestoneKey,
+} from "../utils/milestones";
 import { type Milestone, type MilestoneBucket, type Task } from "../../types";
 import MilestoneTaskRow from "./MilestoneTaskRow";
 import Modal from "./Modal";
@@ -30,8 +38,9 @@ const rebuildFilteredBucket = (
 		counts[status] = (counts[status] ?? 0) + 1;
 	}
 
-	const doneCount = filteredTasks.filter((task) => isDoneStatus(task.status)).length;
+	const doneCount = filteredTasks.filter((task) => isCompletedTaskStatus(task.status, statuses)).length;
 	const progress = filteredTasks.length > 0 ? Math.round((doneCount / filteredTasks.length) * 100) : 0;
+	const isCompleted = !bucket.isNoMilestone && isMilestoneFullyCompleted(filteredTasks, statuses);
 
 	return {
 		...bucket,
@@ -40,6 +49,7 @@ const rebuildFilteredBucket = (
 		total: filteredTasks.length,
 		doneCount,
 		progress,
+		isCompleted,
 	};
 };
 
@@ -519,6 +529,7 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 		const isArchiving = archivingMilestoneKey === bucket.key;
 		const isSavingMilestone = savingMilestoneKey === bucket.key;
 		const isRemoving = removingMilestoneKey === bucket.key;
+		const completedSince = bucket.isCompleted ? getLatestTaskActivityDate(bucket.tasks) : undefined;
 
 		return (
 			<div
@@ -536,9 +547,16 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 				<div className="px-5 py-4">
 					{/* Header row */}
 					<div className="flex items-center justify-between gap-4">
-						<h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
-							{bucket.label}
-						</h3>
+						<div className="min-w-0">
+							<h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+								{bucket.label}
+							</h3>
+							{completedSince && (
+								<p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+									Completed since {completedSince}
+								</p>
+							)}
+						</div>
 						{isEmpty ? (
 							<span className="text-sm text-gray-400 dark:text-gray-500">
 								{isDragging ? "Drop here" : "No tasks"}

@@ -1477,6 +1477,9 @@ ${description || `Milestone: ${title}`}`,
 				case "active_branch_days":
 					config.activeBranchDays = Number.parseInt(value, 10);
 					break;
+				case "milestone_auto_archive_days":
+					config.milestoneAutoArchiveDays = Number.parseInt(value, 10);
+					break;
 				case "onStatusChange":
 				case "on_status_change":
 					// Remove surrounding quotes if present, but preserve inner content
@@ -1513,6 +1516,7 @@ ${description || `Milestone: ${title}`}`,
 			bypassGitHooks: config.bypassGitHooks,
 			checkActiveBranches: config.checkActiveBranches,
 			activeBranchDays: config.activeBranchDays,
+			milestoneAutoArchiveDays: config.milestoneAutoArchiveDays,
 			onStatusChange: config.onStatusChange,
 			prefixes: config.prefixes,
 			backlogDirectory: config.backlogDirectory,
@@ -1546,6 +1550,9 @@ ${description || `Milestone: ${title}`}`,
 				? [`check_active_branches: ${config.checkActiveBranches}`]
 				: []),
 			...(typeof config.activeBranchDays === "number" ? [`active_branch_days: ${config.activeBranchDays}`] : []),
+			...(typeof config.milestoneAutoArchiveDays === "number"
+				? [`milestone_auto_archive_days: ${config.milestoneAutoArchiveDays}`]
+				: []),
 			...(config.onStatusChange ? [`onStatusChange: '${config.onStatusChange}'`] : []),
 			...(config.prefixes?.task ? [`task_prefix: "${config.prefixes.task}"`] : []),
 			...(config.backlogDirectory ? [`backlog_directory: "${config.backlogDirectory}"`] : []),

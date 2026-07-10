@@ -16,7 +16,12 @@ import { registerMcpCommand } from "./commands/mcp.ts";
 import { pickTaskForEditWizard, runTaskCreateWizard, runTaskEditWizard } from "./commands/task-wizard.ts";
 import { DEFAULT_DIRECTORIES, DEFAULT_FILES, DEFAULT_STATUSES } from "./constants/index.ts";
 import { initializeProject } from "./core/init.ts";
-import { buildMilestoneBuckets, collectArchivedMilestoneKeys, milestoneKey } from "./core/milestones.ts";
+import {
+	buildMilestoneBuckets,
+	collectArchivedMilestoneKeys,
+	getLatestTaskActivityDate,
+	milestoneKey,
+} from "./core/milestones.ts";
 import { computeSequences } from "./core/sequences.ts";
 import { formatTaskPlainText } from "./formatters/task-plain-text.ts";
 import {
@@ -110,6 +115,7 @@ const CONFIG_GET_KEYS = [
 	"zeroPaddedIds",
 	"checkActiveBranches",
 	"activeBranchDays",
+	"milestoneAutoArchiveDays",
 ] as const;
 
 const CONFIG_SET_KEYS = [
@@ -127,6 +133,7 @@ const CONFIG_SET_KEYS = [
 	"zeroPaddedIds",
 	"checkActiveBranches",
 	"activeBranchDays",
+	"milestoneAutoArchiveDays",
 ] as const;
 
 function normalizeIntegrationOption(value: string): IntegrationMode | null {
@@ -3265,7 +3272,9 @@ addHelpSchema(milestoneCmd.command("list"), {
 		const formatBucket = (bucket: (typeof buckets)[number]) => {
 			const id = bucket.milestone ?? bucket.label;
 			const label = bucket.label;
-			return `  ${id}: ${label} (${bucket.doneCount}/${bucket.total} done)`;
+			const completedSince = bucket.isCompleted ? getLatestTaskActivityDate(bucket.tasks) : undefined;
+			const completedSuffix = completedSince ? `, completed since ${completedSince}` : "";
+			return `  ${id}: ${label} (${bucket.doneCount}/${bucket.total} done${completedSuffix})`;
 		};
 
 		console.log(`Active milestones (${active.length}):`);
@@ -4116,10 +4125,17 @@ addHelpSchema(configCmd.command("get <key>"), {
 				case "activeBranchDays":
 					console.log(config.activeBranchDays?.toString() || "30");
 					break;
+				case "milestoneAutoArchiveDays":
+					console.log(
+						typeof config.milestoneAutoArchiveDays === "number"
+							? config.milestoneAutoArchiveDays.toString()
+							: "(disabled)",
+					);
+					break;
 				default:
 					console.error(`Unknown config key: ${key}`);
 					console.error(
-						"Available keys: defaultEditor, projectName, defaultStatus, statuses, labels, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays",
+						"Available keys: defaultEditor, projectName, defaultStatus, statuses, labels, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays, milestoneAutoArchiveDays",
 					);
 					process.exit(1);
 			}
@@ -4299,6 +4315,20 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 					config.activeBranchDays = days;
 					break;
 				}
+				case "milestoneAutoArchiveDays": {
+					const normalized = value.trim().toLowerCase();
+					if (normalized === "" || normalized === "off" || normalized === "disabled" || normalized === "null") {
+						config.milestoneAutoArchiveDays = undefined;
+						break;
+					}
+					const days = Number.parseInt(value, 10);
+					if (Number.isNaN(days) || days < 0) {
+						console.error("milestoneAutoArchiveDays must be a non-negative number, or off/disabled to clear.");
+						process.exit(1);
+					}
+					config.milestoneAutoArchiveDays = days;
+					break;
+				}
 				case "statuses":
 				case "labels":
 				case "milestones":
@@ -4330,7 +4360,7 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 				default:
 					console.error(`Unknown config key: ${key}`);
 					console.error(
-						"Available keys: defaultEditor, projectName, defaultStatus, dateFormat, maxColumnWidth, autoOpenBrowser, hideEmptyColumns, defaultPort, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays",
+						"Available keys: defaultEditor, projectName, defaultStatus, dateFormat, maxColumnWidth, autoOpenBrowser, hideEmptyColumns, defaultPort, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays, milestoneAutoArchiveDays",
 					);
 					process.exit(1);
 			}
@@ -4384,28 +4414,61 @@ addHelpSchema(configCmd.command("list"), {
 			console.log(`  taskPrefix: ${config.prefixes?.task || "task"} (read-only)`);
 			console.log(`  checkActiveBranches: ${config.checkActiveBranches ?? "true"}`);
 			console.log(`  activeBranchDays: ${config.activeBranchDays ?? "30"}`);
+			console.log(
+				`  milestoneAutoArchiveDays: ${
+					typeof config.milestoneAutoArchiveDays === "number" ? config.milestoneAutoArchiveDays : "(disabled)"
+				}`,
+			);
 		} catch (err) {
 			console.error("Failed to list config values", err);
 			process.exitCode = 1;
 		}
 	});
 
-// Cleanup command for managing completed tasks
+const CLEANUP_AGE_OPTIONS = [
+	{ title: "1 day", value: 1 },
+	{ title: "1 week", value: 7 },
+	{ title: "2 weeks", value: 14 },
+	{ title: "3 weeks", value: 21 },
+	{ title: "1 month", value: 30 },
+	{ title: "3 months", value: 90 },
+	{ title: "1 year", value: 365 },
+] as const;
+
+function formatCleanupAgeLabel(age: number): string {
+	return CLEANUP_AGE_OPTIONS.find((option) => option.value === age)?.title ?? `${age} day${age === 1 ? "" : "s"}`;
+}
+
+// Cleanup command for managing completed tasks and milestones
 addHelpSchema(program.command("cleanup"), {
-	reads: "Tasks in terminal status from the configured backlog directory",
+	reads: "Terminal-status tasks and fully completed active milestones",
 	required: [],
-	optional: [],
-	writes: "Moves selected terminal-status tasks to the completed folder",
-	output: "Interactive cleanup summary",
-	examples: ["backlog cleanup"],
+	optional: [
+		{ name: "age", type: "Number", description: "Age threshold in days (non-interactive when combined with --yes)" },
+		{ name: "yes", type: "Boolean", description: "Skip confirmation prompts (requires --age)" },
+		{ name: "tasks-only", type: "Boolean", description: "Only clean up terminal-status tasks" },
+		{ name: "milestones-only", type: "Boolean", description: "Only archive completed milestones" },
+	],
+	writes:
+		"Moves terminal-status tasks to completed and/or archives fully completed milestones older than the selected age",
+	output: "Cleanup summary for tasks and milestones",
+	examples: [
+		"backlog cleanup",
+		"backlog cleanup --age 7 --yes",
+		"backlog cleanup --age 14 --yes --milestones-only",
+		"backlog cleanup --age 30 --yes --tasks-only",
+	],
 })
-	.description("move completed tasks to completed folder based on age")
-	.action(async () => {
+	.description("move completed tasks and archive completed milestones based on age")
+	.option("--age <days>", "age threshold in days (non-interactive with --yes)")
+	.option("-y, --yes", "skip confirmation prompts (requires --age)")
+	.option("--tasks-only", "only clean up terminal-status tasks")
+	.option("--milestones-only", "only archive completed milestones")
+	.action(async (options: { age?: string; yes?: boolean; tasksOnly?: boolean; milestonesOnly?: boolean }) => {
 		try {
 			const cwd = await requireProjectRoot();
 			const core = new Core(cwd);
 
-			// Check if backlog project is initialized
 			const config = await core.filesystem.loadConfig();
 			if (!config) {
 				console.error("No backlog project found. Initialize one first with: backlog init");
@@ -4413,117 +4476,185 @@ addHelpSchema(program.command("cleanup"), {
 			}
 			core.gitOps.setConfig(config);
 
+			if (options.tasksOnly && options.milestonesOnly) {
+				console.error("Cannot combine --tasks-only and --milestones-only.");
+				process.exit(1);
+			}
+
+			const includeTasks = !options.milestonesOnly;
+			const includeMilestones = !options.tasksOnly;
+			const shouldAutoCommit = config.autoCommit ?? false;
+			const nonInteractive = Boolean(options.yes);
+
+			let selectedAge: number | undefined;
+			if (options.age !== undefined) {
+				const parsedAge = Number.parseInt(options.age, 10);
+				if (Number.isNaN(parsedAge) || parsedAge < 0) {
+					console.error("--age must be a non-negative number of days.");
+					process.exit(1);
+				}
+				selectedAge = parsedAge;
+			} else if (nonInteractive) {
+				if (typeof config.milestoneAutoArchiveDays === "number" && includeMilestones && !includeTasks) {
+					selectedAge = config.milestoneAutoArchiveDays;
+				} else {
+					console.error(
+						"Non-interactive cleanup requires --age <days> (or config milestoneAutoArchiveDays with --milestones-only).",
+					);
+					process.exit(1);
+				}
+			}
+
+			if (nonInteractive && selectedAge === undefined) {
+				console.error("Non-interactive cleanup requires --age <days>.");
+				process.exit(1);
+			}
+
 			const statuses = config.statuses ?? [...DEFAULT_STATUSES];
 			const terminalStatus = getTerminalStatus(statuses);
-			if (!terminalStatus) {
-				console.log("No terminal status configured for cleanup.");
-				return;
+
+			if (includeTasks && !terminalStatus) {
+				console.log("No terminal status configured for task cleanup.");
+				if (!includeMilestones) {
+					return;
+				}
 			}
-
-			const tasks = await core.queryTasks();
-			const terminalStatusTasks = tasks.filter((task) => isTerminalStatus(task.status, statuses));
-
-			if (terminalStatusTasks.length === 0) {
-				console.log(`No ${terminalStatus} tasks found to clean up.`);
-				return;
-			}
-
-			console.log(`Found ${terminalStatusTasks.length} tasks marked as ${terminalStatus}.`);
-
-			const ageOptions = [
-				{ title: "1 day", value: 1 },
-				{ title: "1 week", value: 7 },
-				{ title: "2 weeks", value: 14 },
-				{ title: "3 weeks", value: 21 },
-				{ title: "1 month", value: 30 },
-				{ title: "3 months", value: 90 },
-				{ title: "1 year", value: 365 },
-			];
-
-			const selectedAgePrompt = await clack.select({
-				message: "Move tasks to completed folder if they are older than:",
-				options: ageOptions.map((option) => ({ label: option.title, value: option.value })),
-			});
-			const selectedAge = clack.isCancel(selectedAgePrompt) ? undefined : selectedAgePrompt;
 
 			if (selectedAge === undefined) {
-				console.log("Cleanup cancelled.");
-				return;
+				const ageOptions = [...CLEANUP_AGE_OPTIONS];
+				const defaultAge =
+					typeof config.milestoneAutoArchiveDays === "number" ? config.milestoneAutoArchiveDays : undefined;
+				const optionsForPrompt: Array<{ label: string; value: number }> = ageOptions.map((option) => ({
+					label: defaultAge === option.value ? `${option.title} (config default)` : option.title,
+					value: option.value,
+				}));
+				if (defaultAge !== undefined && !ageOptions.some((option) => option.value === defaultAge)) {
+					optionsForPrompt.unshift({
+						label: `${defaultAge} day${defaultAge === 1 ? "" : "s"} (config default)`,
+						value: defaultAge,
+					});
+				}
+
+				const selectedAgePrompt = await clack.select({
+					message: includeTasks ? "Clean up items older than:" : "Archive completed milestones older than:",
+					options: optionsForPrompt,
+					initialValue: defaultAge ?? 7,
+				});
+				selectedAge = clack.isCancel(selectedAgePrompt) ? undefined : Number(selectedAgePrompt);
+				if (selectedAge === undefined || Number.isNaN(selectedAge)) {
+					console.log("Cleanup cancelled.");
+					return;
+				}
 			}
 
-			// Get tasks older than selected period
-			const tasksToMove = await core.getTerminalStatusTasksByAge(selectedAge);
-
-			if (tasksToMove.length === 0) {
-				console.log(`No tasks found that are older than ${ageOptions.find((o) => o.value === selectedAge)?.title}.`);
-				return;
-			}
-
-			console.log(
-				`\nFound ${tasksToMove.length} tasks older than ${ageOptions.find((o) => o.value === selectedAge)?.title}:`,
-			);
-			for (const task of tasksToMove.slice(0, 5)) {
-				const date = task.updatedDate || task.createdDate;
-				console.log(`  - ${task.id}: ${task.title} (${date})`);
-			}
-			if (tasksToMove.length > 5) {
-				console.log(`  ... and ${tasksToMove.length - 5} more`);
-			}
-
-			const confirmedPrompt = await clack.confirm({
-				message: `Move ${tasksToMove.length} tasks to completed folder?`,
-				initialValue: false,
-			});
-			const confirmed = clack.isCancel(confirmedPrompt) ? false : confirmedPrompt;
-
-			if (!confirmed) {
-				console.log("Cleanup cancelled.");
-				return;
-			}
-
-			// Move tasks to completed folder
-			let successCount = 0;
-			const shouldAutoCommit = config.autoCommit ?? false;
-
-			console.log("Moving tasks...");
+			const ageLabel = formatCleanupAgeLabel(selectedAge);
 			const movedTasks: Array<{ fromPath: string; toPath: string; taskId: string }> = [];
 
-			for (const task of tasksToMove) {
-				const fromPath = task.filePath ?? (await core.getTask(task.id))?.filePath ?? null;
+			// Archive milestones before moving tasks so Done tasks still count toward completion.
+			if (includeMilestones) {
+				const milestoneCandidates = await core.getCompletedMilestonesByAge(selectedAge);
 
-				if (!fromPath) {
-					console.error(`Failed to locate file for task ${task.id}`);
-					continue;
-				}
-
-				const taskFilename = basename(fromPath);
-				const toPath = join(core.filesystem.completedDir, taskFilename);
-
-				const success = await core.completeTask(task.id);
-				if (success) {
-					successCount++;
-					movedTasks.push({ fromPath, toPath, taskId: task.id });
+				if (milestoneCandidates.length === 0) {
+					console.log(`No completed milestones older than ${ageLabel}.`);
 				} else {
-					console.error(`Failed to move task ${task.id}`);
-				}
-			}
+					console.log(`\nFound ${milestoneCandidates.length} completed milestone(s) older than ${ageLabel}:`);
+					for (const candidate of milestoneCandidates.slice(0, 5)) {
+						console.log(
+							`  - ${candidate.milestone.id}: ${candidate.milestone.title} (completed since ${candidate.completedAt}, ${candidate.taskCount} task${candidate.taskCount === 1 ? "" : "s"})`,
+						);
+					}
+					if (milestoneCandidates.length > 5) {
+						console.log(`  ... and ${milestoneCandidates.length - 5} more`);
+					}
 
-			// If autoCommit is disabled, stage the moves so Git recognizes them
-			const hasGitRepository = await core.gitOps.isRepository();
-			if (successCount > 0 && !shouldAutoCommit && hasGitRepository) {
-				console.log("Staging file moves for Git...");
-				for (const { fromPath, toPath } of movedTasks) {
-					try {
-						await core.gitOps.stageFileMove(fromPath, toPath);
-					} catch (error) {
-						console.warn(`Warning: Could not stage move for Git: ${error}`);
+					let confirmed = nonInteractive;
+					if (!nonInteractive) {
+						const confirmedPrompt = await clack.confirm({
+							message: `Archive ${milestoneCandidates.length} completed milestone(s)?`,
+							initialValue: false,
+						});
+						confirmed = clack.isCancel(confirmedPrompt) ? false : confirmedPrompt;
+					}
+
+					if (!confirmed) {
+						console.log("Milestone cleanup skipped.");
+					} else {
+						console.log("Archiving milestones...");
+						const result = await core.archiveCompletedMilestonesByAge(selectedAge, shouldAutoCommit);
+						for (const failedId of result.failed) {
+							console.error(`Failed to archive milestone ${failedId}`);
+						}
+						console.log(
+							`Successfully archived ${result.archived.length} of ${milestoneCandidates.length} milestone(s).`,
+						);
 					}
 				}
 			}
 
-			console.log(`Successfully moved ${successCount} of ${tasksToMove.length} tasks to completed folder.`);
-			if (successCount > 0 && !shouldAutoCommit && hasGitRepository) {
-				console.log("Files have been staged. To commit: git commit -m 'cleanup: Move completed tasks'");
+			if (includeTasks && terminalStatus) {
+				const tasksToMove = await core.getTerminalStatusTasksByAge(selectedAge);
+
+				if (tasksToMove.length === 0) {
+					console.log(`No ${terminalStatus} tasks older than ${ageLabel}.`);
+				} else {
+					console.log(`\nFound ${tasksToMove.length} ${terminalStatus} task(s) older than ${ageLabel}:`);
+					for (const task of tasksToMove.slice(0, 5)) {
+						const date = task.updatedDate || task.createdDate;
+						console.log(`  - ${task.id}: ${task.title} (${date})`);
+					}
+					if (tasksToMove.length > 5) {
+						console.log(`  ... and ${tasksToMove.length - 5} more`);
+					}
+
+					let confirmed = nonInteractive;
+					if (!nonInteractive) {
+						const confirmedPrompt = await clack.confirm({
+							message: `Move ${tasksToMove.length} tasks to completed folder?`,
+							initialValue: false,
+						});
+						confirmed = clack.isCancel(confirmedPrompt) ? false : confirmedPrompt;
+					}
+
+					if (!confirmed) {
+						console.log("Task cleanup skipped.");
+					} else {
+						console.log("Moving tasks...");
+						let taskSuccessCount = 0;
+						for (const task of tasksToMove) {
+							const fromPath = task.filePath ?? (await core.getTask(task.id))?.filePath ?? null;
+							if (!fromPath) {
+								console.error(`Failed to locate file for task ${task.id}`);
+								continue;
+							}
+							const taskFilename = basename(fromPath);
+							const toPath = join(core.filesystem.completedDir, taskFilename);
+							const success = await core.completeTask(task.id);
+							if (success) {
+								taskSuccessCount++;
+								movedTasks.push({ fromPath, toPath, taskId: task.id });
+							} else {
+								console.error(`Failed to move task ${task.id}`);
+							}
+						}
+
+						const hasGitRepository = await core.gitOps.isRepository();
+						if (taskSuccessCount > 0 && !shouldAutoCommit && hasGitRepository) {
+							console.log("Staging task file moves for Git...");
+							for (const { fromPath, toPath } of movedTasks) {
+								try {
+									await core.gitOps.stageFileMove(fromPath, toPath);
+								} catch (error) {
+									console.warn(`Warning: Could not stage move for Git: ${error}`);
+								}
+							}
+						}
+
+						console.log(`Successfully moved ${taskSuccessCount} of ${tasksToMove.length} tasks to completed folder.`);
+						if (taskSuccessCount > 0 && !shouldAutoCommit && hasGitRepository) {
+							console.log("Files have been staged. To commit: git commit -m 'cleanup: Move completed tasks'");
+						}
+					}
+				}
 			}
 		} catch (err) {
 			console.error("Failed to run cleanup", err);

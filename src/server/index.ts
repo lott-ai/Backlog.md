@@ -1574,19 +1574,29 @@ export class BacklogServer {
 				return Response.json({ error: "Invalid age parameter" }, { status: 400 });
 			}
 
-			const tasksToCleanup = await this.core.getTerminalStatusTasksByAge(age);
+			const [tasksToCleanup, milestoneCandidates] = await Promise.all([
+				this.core.getTerminalStatusTasksByAge(age),
+				this.core.getCompletedMilestonesByAge(age),
+			]);
 
-			// Return preview of tasks to be cleaned up
-			const preview = tasksToCleanup.map((task) => ({
+			const tasks = tasksToCleanup.map((task) => ({
 				id: task.id,
 				title: task.title,
 				updatedDate: task.updatedDate,
 				createdDate: task.createdDate,
 			}));
+			const milestones = milestoneCandidates.map((candidate) => ({
+				id: candidate.milestone.id,
+				title: candidate.milestone.title,
+				completedAt: candidate.completedAt,
+				taskCount: candidate.taskCount,
+			}));
 
 			return Response.json({
-				count: preview.length,
-				tasks: preview,
+				count: tasks.length,
+				tasks,
+				milestoneCount: milestones.length,
+				milestones,
 			});
 		} catch (error) {
 			console.error("Error getting cleanup preview:", error);
@@ -1607,17 +1617,10 @@ export class BacklogServer {
 				return Response.json({ error: "Invalid age parameter" }, { status: 400 });
 			}
 
+			// Archive milestones first so Done tasks still contribute to completion eligibility.
+			const milestoneResult = await this.core.archiveCompletedMilestonesByAge(ageInDays);
 			const tasksToCleanup = await this.core.getTerminalStatusTasksByAge(ageInDays);
 
-			if (tasksToCleanup.length === 0) {
-				return Response.json({
-					success: true,
-					movedCount: 0,
-					message: "No tasks to clean up",
-				});
-			}
-
-			// Move tasks to completed folder
 			let successCount = 0;
 			const failedTasks: string[] = [];
 
@@ -1635,15 +1638,28 @@ export class BacklogServer {
 				}
 			}
 
-			// Notify listeners to refresh
 			this.broadcastTasksUpdated();
+
+			const archivedMilestoneCount = milestoneResult.archived.length;
+			const parts: string[] = [];
+			if (archivedMilestoneCount > 0) {
+				parts.push(`archived ${archivedMilestoneCount} milestone(s)`);
+			}
+			if (successCount > 0 || tasksToCleanup.length > 0) {
+				parts.push(`moved ${successCount} of ${tasksToCleanup.length} tasks to completed folder`);
+			}
+			if (parts.length === 0) {
+				parts.push("Nothing to clean up");
+			}
 
 			return Response.json({
 				success: true,
 				movedCount: successCount,
 				totalCount: tasksToCleanup.length,
 				failedTasks: failedTasks.length > 0 ? failedTasks : undefined,
-				message: `Moved ${successCount} of ${tasksToCleanup.length} tasks to completed folder`,
+				archivedMilestoneCount,
+				failedMilestones: milestoneResult.failed.length > 0 ? milestoneResult.failed : undefined,
+				message: parts.join("; "),
 			});
 		} catch (error) {
 			console.error("Error executing cleanup:", error);

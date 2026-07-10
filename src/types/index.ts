@@ -333,6 +333,8 @@ export interface BacklogConfig {
 	bypassGitHooks?: boolean;
 	checkActiveBranches?: boolean; // Check task states across active branches (default: true)
 	activeBranchDays?: number; // How many days a branch is considered active (default: 30)
+	/** When set, cleanup uses this default age (days) for archiving fully completed milestones. Unset = disabled. */
+	milestoneAutoArchiveDays?: number;
 	/** Project-relative backlog folder when config is stored at project root in backlog.config.yml. */
 	backlogDirectory?: string;
 	/** Global callback command to run on any task status change. Supports $TASK_ID, $OLD_STATUS, $NEW_STATUS, $TASK_TITLE variables. */
