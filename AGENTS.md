@@ -81,6 +81,7 @@ are found, the commit will be blocked until fixed.
 
 - **Work in a worktree**: Do all task work in a dedicated git worktree, not the primary checkout. Create it on a task branch (e.g. `git worktree add ../bmd-back-123 -b tasks/back-123-feature-name`), since git will not check out `main` in two worktrees at once.
 - **When finished, commit to `main` (local only)**: After the work is complete and verified, land the commit(s) on `main` in the primary checkout by fast-forwarding/merging the task branch (e.g. `git checkout main && git merge --ff-only tasks/back-123-feature-name`). Then remove the worktree (`git worktree remove ...`).
+- **Clean up the task branch**: Once the commit(s) have landed on `main`, delete the task branch (e.g. `git branch -d tasks/back-123-feature-name`).
 - **Do not push**: Never `git push` as part of finishing a task. Leave pushing (and any PR) to the maintainer unless explicitly asked.
 
 ### Conventions
