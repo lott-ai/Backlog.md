@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backlog Task Orchestrator"
+  short_description: "Run Backlog milestones in parallel"
+  default_prompt: "Use $backlog-task-orchestrator to orchestrate milestone m-4."
