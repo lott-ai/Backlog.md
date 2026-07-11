@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backlog Task Planner"
+  short_description: "Turn approved plans into parallel Backlog tasks"
+  default_prompt: "Use $backlog-task-planner to turn the approved plan into a milestone and dependency-aware tasks."
